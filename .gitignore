@@ -1,0 +1,14 @@
+.env
+*.env
+env-cloud.yaml
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.idea/
+.vscode/
+*.log
+outputs/

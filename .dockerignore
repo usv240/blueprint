@@ -1,0 +1,14 @@
+.env
+.env.*
+*.pyc
+__pycache__
+.git
+.gitignore
+*.md
+.dockerignore
+deploy.sh
+*.log
+*.tmp
+.venv
+venv
+node_modules
