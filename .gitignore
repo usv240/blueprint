@@ -8,6 +8,7 @@ dist/
 build/
 .venv/
 venv/
+.pytest_cache/
 .idea/
 .vscode/
 *.log
