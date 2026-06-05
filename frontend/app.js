@@ -199,14 +199,12 @@ async function loadHealth() {
     }
     if (geminiEl && _healthData.gemini_model) {
       geminiEl.dataset.tooltip = geminiEl.dataset.tooltip || '';
-      const fallback = _healthData.fallback_model ? `\nFallback: ${_healthData.fallback_model} (Vertex AI)` : '';
-      const agents   = _healthData.agents ? `${_healthData.agents}-agent SequentialAgent` : '';
+      const agents = _healthData.agents ? `${_healthData.agents}-agent SequentialAgent` : '';
       geminiEl.dataset.tooltip = [
         `Model: ${_healthData.gemini_model}`,
         agents,
         'Adversarial debate: Optimist vs Pessimist',
         'SSE streaming · Google Cloud ADK',
-        fallback,
       ].filter(Boolean).join('\n');
     }
     if (pipelineEl && _healthData.agents) {
@@ -225,8 +223,7 @@ async function loadHealth() {
       geminiNameEl.textContent = `Google ADK + ${_healthData.gemini_model}`;
     }
     if (geminiDetailEl && _healthData.agents) {
-      const fallback = _healthData.fallback_model ? ` · Fallback: ${_healthData.fallback_model}` : '';
-      geminiDetailEl.textContent = `${_healthData.agents}-agent SequentialAgent · Adversarial debate · SSE streaming${fallback}`;
+      geminiDetailEl.textContent = `${_healthData.agents}-agent SequentialAgent · Adversarial debate · SSE streaming`;
     }
     if (elasticDetailEl && _healthData.elastic_capabilities) {
       elasticDetailEl.textContent = _healthData.elastic_capabilities
