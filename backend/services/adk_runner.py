@@ -258,31 +258,38 @@ PM2.5 Air Quality: {neighborhood.get('pm25', 'N/A')} µg/m³
 Schools Nearby: {neighborhood.get('schools_nearby', 'N/A')}
 Diligence Questions: {report.get('diligence_questions', [])}"""
 
+    opt_floor = max(0,   score - 25)   # Optimist can argue at most 25 points below synthesis
+    pes_ceil  = min(100, score + 25)   # Pessimist can argue at most 25 points above synthesis
+
     _step("DebateAgent", "OptimistAgent: building the case that risk is overstated")
     optimist_prompt = f"""You are OptimistAgent, a real estate optimist attorney reviewing this property report.
-Your job: argue that the risk score of {score}/100 is TOO HIGH. Find every positive signal, explain why each flag may be manageable, and present the best-case scenario for a buyer.
+Your job: argue that the risk score of {score}/100 is TOO HIGH. Find every positive signal and explain why each flag may be manageable.
 
 {context}
 
+Your adjusted_score must be between {opt_floor} and {score - 1} (lower than the original, but no more than 25 points below it).
+
 Respond with JSON:
-{{"argument": "<2-3 sentence optimistic case>", "adjusted_score": <integer, lower than {score}>, "key_positives": ["<3 specific points in favour of buying>"]}}"""
+{{"argument": "<2-3 sentence optimistic case>", "adjusted_score": <integer between {opt_floor} and {score - 1}>, "key_positives": ["<3 specific points in favour>"]}}"""
 
     _step("DebateAgent", "PessimistAgent: building the worst-case scenario")
     pessimist_prompt = f"""You are PessimistAgent, a risk-averse real estate attorney reviewing this property report.
-Your job: argue that the risk score of {score}/100 is TOO LOW. Identify every worst-case scenario, hidden liability, and what could go catastrophically wrong after purchase.
+Your job: argue that the risk score of {score}/100 is TOO LOW. Identify worst-case scenarios and hidden liabilities.
 
 {context}
 
+Your adjusted_score must be between {score + 1} and {pes_ceil} (higher than the original, but no more than 25 points above it).
+
 Respond with JSON:
-{{"argument": "<2-3 sentence pessimistic case>", "adjusted_score": <integer, higher than {score}>, "key_risks": ["<3 specific worst-case risks>"]}}"""
+{{"argument": "<2-3 sentence pessimistic case>", "adjusted_score": <integer between {score + 1} and {pes_ceil}>, "key_risks": ["<3 specific worst-case risks>"]}}"""
 
     optimist_result, pessimist_result = await asyncio.gather(
         gemini.generate_json(optimist_prompt),
         gemini.generate_json(pessimist_prompt),
     )
 
-    opt_score = optimist_result.get("adjusted_score", max(0, score - 10))
-    pes_score = pessimist_result.get("adjusted_score", min(100, score + 10))
+    opt_score = max(opt_floor, min(score - 1, int(optimist_result.get("adjusted_score", score - 10))))
+    pes_score = min(pes_ceil,  max(score + 1, int(pessimist_result.get("adjusted_score", score + 10))))
 
     _step("DebateAgent",
           f"OptimistAgent scores it {opt_score} · PessimistAgent scores it {pes_score}",
@@ -708,11 +715,21 @@ Your task: produce a JSON report with this exact schema:
   "escape_plan": [<list of 3-5 specific, actionable steps ranked by risk-reduction impact, each as a string like "Resolve 30 open permits → estimated -25 risk points (HIGH → MEDIUM)">]
 }}
 
-Scoring guide:
-  0-25  = LOW: no significant flags, good records availability
-  26-50 = MEDIUM: minor open items worth verifying
-  51-75 = HIGH: multiple flags or significant climate risk
-  76-100 = CRITICAL: major unresolved issues, high flood/earthquake risk, or suspicious patterns
+Scoring guide — use these bands exactly, they must match risk_level:
+  0-30   = LOW:      clean records, minor items only
+  31-60  = MEDIUM:   one or two open items worth verifying; no major hazards
+  61-80  = HIGH:     multiple compounding flags or significant unresolved liability
+  81-100 = CRITICAL: severe or multiple hazards; major legal/financial exposure
+
+Anchor rules — apply these FIRST before adjusting for context:
+  - Each open/unresolved building permit: +2 points (e.g. 30 permits = minimum score 60, start HIGH)
+  - FEMA Zone AE (Special Flood Hazard Area): add 30 points floor
+  - Superfund site within 1 mile: add 25 points floor
+  - Quitclaim deed or price drop >30% in <12 months: add 15 points
+  - FEMA Zone X with no other flags: base score 10-20 (LOW)
+  - No flags at all: score 5-15
+
+Apply anchor rules first, then adjust up or down by max 15 points for mitigating or compounding context.
 
 Be specific, factual, and source-referenced. Use "public records show..." and "FEMA data indicates..." rather than vague language.
 """
