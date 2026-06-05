@@ -17,59 +17,43 @@ Type any US address. BLUEPRINT's pipeline retrieves deed history, building permi
 ## Architecture
 
 ```mermaid
-flowchart LR
-    User(["👤 User"])
+flowchart TD
+    U(["👤 User"])
 
-    subgraph FE["Frontend  ·  Vanilla JS  ·  Cloud Run"]
-        direction TB
-        UI["Landing · Analysis App\nElastic Intelligence Dashboard"]
+    subgraph CLOUD["Google Cloud Run"]
+        direction LR
+        FE["Frontend\nVanilla JS"]
+        BE["Backend\nFastAPI · SSE stream"]
+        FE --> BE
     end
 
-    subgraph BE["Backend  ·  FastAPI  ·  Cloud Run"]
-        direction TB
-        API["REST API + SSE Stream\nReal-time agent events"]
+    subgraph ADK["Google Cloud ADK · SequentialAgent · Gemini 3 Flash · Vertex AI fallback"]
+        direction LR
+        COL["Data Collection  ①–⑤\nGeocoder · Deed · Permit\nClimate · Neighbourhood"]
+        SYN["⑥ SynthesisAgent\nElastic MCP hybrid search\n5 ES|QL queries · Risk Score"]
+        DEB["⑦ DebateAgent\nOptimist vs Pessimist\nBUY / NEGOTIATE / AVOID"]
+        COL --> SYN --> DEB
     end
 
-    subgraph ADK["Google Cloud ADK  ·  SequentialAgent  ·  7 Agents"]
-        direction TB
-        A1["① Geocoder\nAddress → lat/lng · Elastic case file"]
-        A2["② Deed\nOwnership history · anomaly flags"]
-        A3["③ Permit\n50+ city open-data portals"]
-        A4["④ Climate\nFEMA flood zone · USGS earthquakes"]
-        A5["⑤ Neighbourhood\nEPA EJSCREEN · OSM amenities"]
-        A6["⑥ Synthesis\nElastic MCP hybrid search\n5 ES|QL queries → Risk Score"]
-        A7["⑦ Debate\nOptimist vs Pessimist\nBUY / NEGOTIATE / AVOID"]
-        A1-->A2-->A3-->A4-->A5-->A6-->A7
+    subgraph EL["Elastic Cloud Serverless · Agent Builder MCP"]
+        direction LR
+        ES1["ELSER + RRF hybrid\nText similarity reranker"]
+        ES2["ES|QL · Percolator\nGeo-distance · Sig. Terms"]
+        ES3["Memory Layer · 6 Indices\nevents · reports · cases\nalerts · shared · watched"]
+        ES1 --> ES2 --> ES3
     end
 
-    subgraph GCP["Google AI"]
-        G1["Gemini 3 Flash\nPrimary model"]
-        G2["Gemini 2.5 Flash\nVertex AI fallback"]
+    subgraph DATA["Public Data Sources · Authoritative · Free"]
+        direction LR
+        D1["FEMA NFHL · USGS"] 
+        D2["EPA EJSCREEN · OSM"]
+        D3["NYC DOB · Socrata 50+ cities"]
     end
 
-    subgraph EL["Elastic Cloud Serverless  ·  Agent Builder MCP"]
-        direction TB
-        E1["Agent Builder MCP\nStreamable HTTP · Custom ES|QL tools"]
-        E2["ELSER · RRF hybrid · Reranker"]
-        E3["ES|QL · Percolator · Geo-distance\nSignificant terms · Aggregations"]
-        E4["Memory Layer  ·  6 Indices\nevents · reports · cases · alerts · shared · watched"]
-        E1-->E2-->E3-->E4
-    end
-
-    subgraph DATA["Public Data  ·  All authoritative, all free"]
-        direction TB
-        D1["FEMA NFHL  ·  USGS"]
-        D2["EPA EJSCREEN  ·  OpenStreetMap"]
-        D3["NYC DOB  ·  Socrata 50+ cities"]
-    end
-
-    User-->FE-->BE-->ADK
-    ADK<-->GCP
-    A3-->D3
-    A4-->D1
-    A5-->D2
-    A6<-->|"MCP: search · ES|QL\ncustom tools"|E1
-    A7-->E3
+    U --> CLOUD --> ADK
+    COL --> DATA
+    SYN <-->|"Agent Builder MCP\nELSER · ES|QL tools"| ES1
+    DEB --> ES2
 ```
 
 > Full architecture details, data flow walkthrough, and Elastic capability map: **[docs/architecture.md](docs/architecture.md)**  
