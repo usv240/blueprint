@@ -7,6 +7,7 @@ Type any US address. BLUEPRINT reads the public record (deeds, building permits,
 [![Gemini 3 Flash](https://img.shields.io/badge/Gemini-3%20Flash%20Preview-blue)](https://ai.google.dev)
 [![Elastic Agent Builder](https://img.shields.io/badge/Elastic-Agent%20Builder%20MCP-pink)](https://www.elastic.co)
 [![FastAPI](https://img.shields.io/badge/FastAPI-async-green)](https://fastapi.tiangolo.com)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-blueprint-brightgreen)](https://blueprint-4foxtttuoa-uc.a.run.app)
 
 Most buyers close on a $500K–$1M home with a 30-minute walkthrough and a seller's disclosure. That disclosure won't mention the 12 open DOB permits, the Superfund site half a mile away, or the fact that the flood zone designation hasn't been updated since 2009. BLUEPRINT surfaces all of it in about 60 seconds.
 
