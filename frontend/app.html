@@ -42,12 +42,30 @@
       </div>
       <div class="stat-item">
         <span class="stat-value stat-badge" id="stat-elastic"
-              data-tooltip="Elastic Agent Builder MCP&#10;RRF hybrid: BM25 + ELSER semantic&#10;Semantic reranker (.rerank-v1-elasticsearch)&#10;ES|QL cross-reference + flip-fraud detection&#10;Percolator risk alerts · Geo-distance intelligence">Elastic SDK</span>
+              data-tooltip="Elastic Agent Builder MCP&#10;RRF hybrid: BM25 + ELSER semantic&#10;Semantic reranker (.rerank-v1-elasticsearch)&#10;ES|QL cross-reference + flip-fraud detection&#10;Percolator risk alerts · Geo-distance intelligence">
+          <span class="stat-live-dot" id="stat-elastic-dot"></span>
+          <span class="stat-brand-mark" aria-hidden="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L3 7v10l9 5 9-5V7L12 2z" fill="url(#eg)"/>
+              <defs><linearGradient id="eg" x1="3" y1="2" x2="21" y2="22" gradientUnits="userSpaceOnUse"><stop stop-color="#f04e98"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs>
+            </svg>
+          </span>
+          <span id="stat-elastic-text">Elastic SDK</span>
+        </span>
         <span class="stat-label">Hybrid retrieval + memory layer</span>
       </div>
       <div class="stat-item">
         <span class="stat-value stat-badge" id="stat-gemini"
-              data-tooltip="Loading…">Loading…</span>
+              data-tooltip="Loading…">
+          <span class="stat-live-dot" id="stat-gemini-dot"></span>
+          <span class="stat-brand-mark" aria-hidden="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2C12 2 13.8 8.8 18 12C13.8 15.2 12 22 12 22C12 22 10.2 15.2 6 12C10.2 8.8 12 2 12 2Z" fill="url(#gg)"/>
+              <defs><linearGradient id="gg" x1="6" y1="2" x2="18" y2="22" gradientUnits="userSpaceOnUse"><stop stop-color="#4285f4"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs>
+            </svg>
+          </span>
+          <span id="stat-gemini-text">Loading…</span>
+        </span>
         <span class="stat-label" id="stat-pipeline-label">ADK pipeline</span>
       </div>
     </div>

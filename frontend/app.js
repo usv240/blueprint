@@ -189,10 +189,16 @@ async function loadHealth() {
     _healthData = await res.json();
 
     // Populate Gemini model badge
-    const geminiEl = document.getElementById('stat-gemini');
-    const pipelineEl = document.getElementById('stat-pipeline-label');
+    const geminiEl     = document.getElementById('stat-gemini');
+    const geminiTextEl = document.getElementById('stat-gemini-text');
+    const geminiDotEl  = document.getElementById('stat-gemini-dot');
+    const pipelineEl   = document.getElementById('stat-pipeline-label');
+    if (geminiTextEl && _healthData.gemini_model) {
+      geminiTextEl.textContent = _healthData.gemini_model;
+      if (geminiDotEl) geminiDotEl.classList.remove('degraded');
+    }
     if (geminiEl && _healthData.gemini_model) {
-      geminiEl.textContent = _healthData.gemini_model;
+      geminiEl.dataset.tooltip = geminiEl.dataset.tooltip || '';
       const fallback = _healthData.fallback_model ? `\nFallback: ${_healthData.fallback_model} (Vertex AI)` : '';
       const agents   = _healthData.agents ? `${_healthData.agents}-agent SequentialAgent` : '';
       geminiEl.dataset.tooltip = [
@@ -258,11 +264,14 @@ async function loadStats() {
     if (typeof d.total_analyses === 'number') animateStat('stat-total', d.total_analyses);
     if (typeof d.analyses_24h  === 'number') animateStat('stat-24h',   d.analyses_24h);
 
-    const elasticEl = document.getElementById('stat-elastic');
-    if (elasticEl) {
+    const elasticTextEl = document.getElementById('stat-elastic-text');
+    const elasticDotEl  = document.getElementById('stat-elastic-dot');
+    const elasticEl     = document.getElementById('stat-elastic');
+    if (elasticTextEl) {
       const mcpActive = d.elastic_mcp_active;
-      elasticEl.textContent = mcpActive ? 'Elastic MCP ✓' : 'Elastic SDK';
-      elasticEl.dataset.tooltip = [
+      elasticTextEl.textContent = mcpActive ? 'Elastic MCP ✓' : 'Elastic SDK';
+      if (elasticDotEl) elasticDotEl.classList.toggle('degraded', !mcpActive);
+      if (elasticEl) elasticEl.dataset.tooltip = [
         mcpActive ? 'Agent Builder MCP: active' : 'Agent Builder MCP: unavailable (direct SDK)',
         'RRF hybrid retrieval: BM25 + ELSER semantic',
         'Semantic reranker (.rerank-v1-elasticsearch)',

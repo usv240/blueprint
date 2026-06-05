@@ -159,12 +159,43 @@ a.btn-primary, a.btn-ghost { text-decoration: none; display: inline-block; }
 }
 .stat-label { font-size: 0.72rem; color: var(--text2); }
 .stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.78rem;
   font-weight: 600;
   background: linear-gradient(135deg, var(--elastic), #a855f7);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+
+/* Live status dot inside stat badges */
+.stat-live-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success, #22c55e);
+  box-shadow: 0 0 0 2px rgba(34,197,94,0.2);
+  animation: live-pulse 2s ease-in-out infinite;
+  -webkit-text-fill-color: initial;
+}
+.stat-live-dot.degraded {
+  background: var(--warn, #eab308);
+  box-shadow: 0 0 0 2px rgba(234,179,8,0.2);
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1);    box-shadow: 0 0 0 2px rgba(34,197,94,0.2); }
+  50%       { opacity: 0.7; transform: scale(0.85); box-shadow: 0 0 0 4px rgba(34,197,94,0.08); }
+}
+
+/* Brand mark SVG inside stat badges */
+.stat-brand-mark {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  -webkit-text-fill-color: initial;
 }
 
 /* ── Hover tooltip (data-tooltip attr, CSS-only, no JS library) ─────────── */
