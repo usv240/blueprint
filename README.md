@@ -14,7 +14,70 @@ Type any US address. BLUEPRINT's pipeline retrieves deed history, building permi
 
 ---
 
-## Architecture & technology
+## Architecture
+
+```mermaid
+flowchart TB
+    User(["User — Browser"])
+
+    subgraph FE["Frontend · Vanilla JS · Cloud Run"]
+        APP["Analysis App · Landing Page · Elastic Intelligence Dashboard"]
+    end
+
+    subgraph BACKEND["Backend · FastAPI · Google Cloud Run"]
+        REST["REST API  /api/analyze · /api/report · /api/share · /api/export · /api/compare · /api/ask"]
+        SSE["SSE Stream  /api/analyze/stream — per-agent events in real time"]
+    end
+
+    subgraph ADK["Google Cloud ADK · SequentialAgent"]
+        direction LR
+        AG1["1 · GeocoderAgent\nAddress → lat/lng\nOpen Elastic case file"]
+        AG2["2 · DeedAgent\nOwnership history\nPrice anomaly flags"]
+        AG3["3 · PermitAgent\nNYC DOB + 50+ Socrata cities\nOpen permit detection"]
+        AG4["4 · ClimateAgent\nFEMA flood zone\nUSGS earthquakes 75 km"]
+        AG5["5 · NeighborhoodAgent\nEPA EJSCREEN\nOSM amenities 500 m"]
+        AG6["6 · SynthesisAgent\nElastic Agent Builder MCP\nELSER + RRF hybrid search\n5 ES|QL cross-reference queries\nBuyer Risk Score + Escape Plan"]
+        AG7["7 · DebateAgent\nOptimistAgent vs PessimistAgent\nConfidence-adjusted verdict\nBUY / NEGOTIATE / AVOID"]
+        AG1 --> AG2 --> AG3 --> AG4 --> AG5 --> AG6 --> AG7
+    end
+
+    subgraph GEMINI["Google AI"]
+        GEM["Gemini 3 Flash Preview · Primary"]
+        VTX["Gemini 2.5 Flash · Vertex AI · Fallback"]
+    end
+
+    subgraph ELASTIC["Elastic Cloud Serverless · Agent Builder MCP"]
+        direction TB
+        MCP["Agent Builder MCP\nStreamable HTTP · Custom ES|QL tools via Kibana API"]
+        SEARCH["ELSER semantic · RRF hybrid BM25⊕ELSER\nText similarity reranker"]
+        ESQL["ES|QL Engine · 5 queries/analysis\nFlip-fraud · Permit-sale timing · RERANK"]
+        PROACTIVE["Percolator alerts · Geo-distance 50 km\nSignificant terms · Market aggregations"]
+        MEM["Memory Layer · 6 Indices\nevents · reports · cases · alerts · shared · watched"]
+    end
+
+    subgraph SOURCES["Public Data Sources"]
+        S1["FEMA NFHL · USGS Earthquakes"]
+        S2["EPA EJSCREEN · OpenStreetMap"]
+        S3["NYC DOB · Socrata 50+ cities"]
+    end
+
+    User --> FE
+    FE <-->|"SSE: step · finding · complete · debate_complete"| BACKEND
+    BACKEND --> ADK
+    ADK <--> GEMINI
+    AG3 --> S3
+    AG4 --> S1
+    AG5 --> S2
+    AG6 <-->|"MCP tools\nplatform.core.search · execute_esql\nblueprint_flip_fraud"| MCP
+    MCP --> SEARCH & ESQL
+    AG7 --> PROACTIVE
+    ELASTIC --> MEM
+```
+
+> Full architecture details, data flow walkthrough, and Elastic capability map: **[docs/architecture.md](docs/architecture.md)**  
+> Key architectural decisions: **[docs/adr/](docs/adr/)**
+
+### Technology
 
 | Capability | How BLUEPRINT delivers it |
 |---|---|
