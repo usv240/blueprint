@@ -12,7 +12,7 @@ function gotoApp(address) {
 
 document.addEventListener('DOMContentLoaded', () => {
   // Theme (shared key with the app)
-  applyTheme(localStorage.getItem('bp-theme') || 'dark');
+  applyTheme(localStorage.getItem('bp-theme') || 'light');
   document.getElementById('btn-theme')?.addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
     applyTheme(next);

@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadHealth();
   loadAbout();
   setInterval(loadStats, 30_000);
-  applyTheme(localStorage.getItem('bp-theme') || 'dark');
+  applyTheme(localStorage.getItem('bp-theme') || 'light');
   const yearEl = document.getElementById('app-year');
   if (yearEl) yearEl.textContent = new Date().getFullYear();
 
