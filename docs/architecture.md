@@ -9,8 +9,8 @@
 ## Architecture Diagram
 
 ```mermaid
-flowchart TB
-    User(["User — Browser"])
+flowchart LR
+    User(["👤 User"])
 
     subgraph FE["Frontend · Vanilla JS · Cloud Run"]
         LP["Landing Page\nAddress search · Features"]

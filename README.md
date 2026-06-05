@@ -17,61 +17,59 @@ Type any US address. BLUEPRINT's pipeline retrieves deed history, building permi
 ## Architecture
 
 ```mermaid
-flowchart TB
-    User(["User — Browser"])
+flowchart LR
+    User(["👤 User"])
 
-    subgraph FE["Frontend · Vanilla JS · Cloud Run"]
-        APP["Analysis App · Landing Page · Elastic Intelligence Dashboard"]
-    end
-
-    subgraph BACKEND["Backend · FastAPI · Google Cloud Run"]
-        REST["REST API  /api/analyze · /api/report · /api/share · /api/export · /api/compare · /api/ask"]
-        SSE["SSE Stream  /api/analyze/stream — per-agent events in real time"]
-    end
-
-    subgraph ADK["Google Cloud ADK · SequentialAgent"]
-        direction LR
-        AG1["1 · GeocoderAgent\nAddress → lat/lng\nOpen Elastic case file"]
-        AG2["2 · DeedAgent\nOwnership history\nPrice anomaly flags"]
-        AG3["3 · PermitAgent\nNYC DOB + 50+ Socrata cities\nOpen permit detection"]
-        AG4["4 · ClimateAgent\nFEMA flood zone\nUSGS earthquakes 75 km"]
-        AG5["5 · NeighborhoodAgent\nEPA EJSCREEN\nOSM amenities 500 m"]
-        AG6["6 · SynthesisAgent\nElastic Agent Builder MCP\nELSER + RRF hybrid search\n5 ES|QL cross-reference queries\nBuyer Risk Score + Escape Plan"]
-        AG7["7 · DebateAgent\nOptimistAgent vs PessimistAgent\nConfidence-adjusted verdict\nBUY / NEGOTIATE / AVOID"]
-        AG1 --> AG2 --> AG3 --> AG4 --> AG5 --> AG6 --> AG7
-    end
-
-    subgraph GEMINI["Google AI"]
-        GEM["Gemini 3 Flash Preview · Primary"]
-        VTX["Gemini 2.5 Flash · Vertex AI · Fallback"]
-    end
-
-    subgraph ELASTIC["Elastic Cloud Serverless · Agent Builder MCP"]
+    subgraph FE["Frontend  ·  Vanilla JS  ·  Cloud Run"]
         direction TB
-        MCP["Agent Builder MCP\nStreamable HTTP · Custom ES|QL tools via Kibana API"]
-        SEARCH["ELSER semantic · RRF hybrid BM25⊕ELSER\nText similarity reranker"]
-        ESQL["ES|QL Engine · 5 queries/analysis\nFlip-fraud · Permit-sale timing · RERANK"]
-        PROACTIVE["Percolator alerts · Geo-distance 50 km\nSignificant terms · Market aggregations"]
-        MEM["Memory Layer · 6 Indices\nevents · reports · cases · alerts · shared · watched"]
+        UI["Landing · Analysis App\nElastic Intelligence Dashboard"]
     end
 
-    subgraph SOURCES["Public Data Sources"]
-        S1["FEMA NFHL · USGS Earthquakes"]
-        S2["EPA EJSCREEN · OpenStreetMap"]
-        S3["NYC DOB · Socrata 50+ cities"]
+    subgraph BE["Backend  ·  FastAPI  ·  Cloud Run"]
+        direction TB
+        API["REST API + SSE Stream\nReal-time agent events"]
     end
 
-    User --> FE
-    FE <-->|"SSE: step · finding · complete · debate_complete"| BACKEND
-    BACKEND --> ADK
-    ADK <--> GEMINI
-    AG3 --> S3
-    AG4 --> S1
-    AG5 --> S2
-    AG6 <-->|"MCP tools\nplatform.core.search · execute_esql\nblueprint_flip_fraud"| MCP
-    MCP --> SEARCH & ESQL
-    AG7 --> PROACTIVE
-    ELASTIC --> MEM
+    subgraph ADK["Google Cloud ADK  ·  SequentialAgent  ·  7 Agents"]
+        direction TB
+        A1["① Geocoder\nAddress → lat/lng · Elastic case file"]
+        A2["② Deed\nOwnership history · anomaly flags"]
+        A3["③ Permit\n50+ city open-data portals"]
+        A4["④ Climate\nFEMA flood zone · USGS earthquakes"]
+        A5["⑤ Neighbourhood\nEPA EJSCREEN · OSM amenities"]
+        A6["⑥ Synthesis\nElastic MCP hybrid search\n5 ES|QL queries → Risk Score"]
+        A7["⑦ Debate\nOptimist vs Pessimist\nBUY / NEGOTIATE / AVOID"]
+        A1-->A2-->A3-->A4-->A5-->A6-->A7
+    end
+
+    subgraph GCP["Google AI"]
+        G1["Gemini 3 Flash\nPrimary model"]
+        G2["Gemini 2.5 Flash\nVertex AI fallback"]
+    end
+
+    subgraph EL["Elastic Cloud Serverless  ·  Agent Builder MCP"]
+        direction TB
+        E1["Agent Builder MCP\nStreamable HTTP · Custom ES|QL tools"]
+        E2["ELSER · RRF hybrid · Reranker"]
+        E3["ES|QL · Percolator · Geo-distance\nSignificant terms · Aggregations"]
+        E4["Memory Layer  ·  6 Indices\nevents · reports · cases · alerts · shared · watched"]
+        E1-->E2-->E3-->E4
+    end
+
+    subgraph DATA["Public Data  ·  All authoritative, all free"]
+        direction TB
+        D1["FEMA NFHL  ·  USGS"]
+        D2["EPA EJSCREEN  ·  OpenStreetMap"]
+        D3["NYC DOB  ·  Socrata 50+ cities"]
+    end
+
+    User-->FE-->BE-->ADK
+    ADK<-->GCP
+    A3-->D3
+    A4-->D1
+    A5-->D2
+    A6<-->|"MCP: search · ES|QL\ncustom tools"|E1
+    A7-->E3
 ```
 
 > Full architecture details, data flow walkthrough, and Elastic capability map: **[docs/architecture.md](docs/architecture.md)**  
