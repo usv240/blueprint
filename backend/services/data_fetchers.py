@@ -1261,7 +1261,10 @@ async def _fema_flood(lat: float, lng: float) -> dict:
         except Exception as e:
             logger.warning("[climate/fema] %s failed for (%.4f,%.4f): %s",
                            url.split("/")[-2], lat, lng, e)
-    return {"flood_zone": "UNKNOWN", "sfha": False}
+    # All queries returned no features.
+    # Areas with no NFHL polygon are outside the Special Flood Hazard Area — treat as Zone X.
+    logger.info("[climate/fema] no polygon found for (%.4f,%.4f) — defaulting to Zone X (outside SFHA)", lat, lng)
+    return {"flood_zone": "X", "sfha": False, "zone_subtype": "AREA OF MINIMAL FLOOD HAZARD"}
 
 
 async def _usgs_earthquakes(lat: float, lng: float) -> dict:
