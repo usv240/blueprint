@@ -13,3 +13,11 @@ venv/
 .vscode/
 *.log
 outputs/
+
+# Internal hackathon reference docs — not part of the project
+Elastic Rules
+Main Rules
+TODO.md
+
+# Debug / one-off scripts
+epa_test.py

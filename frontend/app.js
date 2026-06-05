@@ -28,6 +28,7 @@ let currentWatched     = false;
 let activeEventSource  = null;
 let currentFilter      = 'all';
 let allTimelineItems   = [];
+let _currentReport     = null;   // latest rendered report (for verdict refresh on debate)
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -36,6 +37,25 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAbout();
   setInterval(loadStats, 30_000);
   applyTheme(localStorage.getItem('bp-theme') || 'dark');
+  const yearEl = document.getElementById('app-year');
+  if (yearEl) yearEl.textContent = new Date().getFullYear();
+
+  // Deep-links from the landing page / shared URLs:
+  //   ?address=<addr>      → auto-run a fresh analysis (landing search + demo chips)
+  //   ?report=<hash>       → open a stored report by address_hash
+  //   ?share=<id>          → open a publicly shared report by share_id
+  const _params   = new URLSearchParams(location.search);
+  const _address  = _params.get('address');
+  const _rptHash  = _params.get('report');
+  const _shareId  = _params.get('share');
+  if (_shareId) {
+    openSharedReport(_shareId);
+  } else if (_rptHash) {
+    openStoredReport(_rptHash);
+  } else if (_address && _address.trim().length >= 5) {
+    addressInput.value = _address.trim();
+    startAnalysis(_address.trim());
+  }
 
   // Demo preset buttons
   document.querySelectorAll('.btn-preset').forEach(btn => {
@@ -58,6 +78,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // New search / retry
   btnNewSearch.addEventListener('click', showSearch);
   btnRetry.addEventListener('click', showSearch);
+
+  // Analysis log drawer toggle
+  document.getElementById('log-drawer-toggle')?.addEventListener('click', () => {
+    const toggle = document.getElementById('log-drawer-toggle');
+    const body   = document.getElementById('log-drawer-body');
+    if (!toggle || !body) return;
+    const open = toggle.getAttribute('aria-expanded') === 'true';
+    toggle.setAttribute('aria-expanded', String(!open));
+    body.style.display = open ? 'none' : 'flex';
+  });
 
   // How it works modal
   btnHiw.addEventListener('click', async () => {
@@ -121,6 +151,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Compare modal
   initCompare();
 
+  // Elastic Intelligence dashboard
+  initElasticDashboard();
+
+  // a11y: Esc closes any open modal
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.modal-overlay').forEach(m => {
+      if (m.style.display !== 'none') hide(m);
+    });
+  });
+
   // Inline HIW button (inside how-section on landing page)
   document.getElementById('btn-hiw-inline')?.addEventListener('click', async () => {
     show(modalHiw);
@@ -152,6 +193,15 @@ async function loadHealth() {
     const pipelineEl = document.getElementById('stat-pipeline-label');
     if (geminiEl && _healthData.gemini_model) {
       geminiEl.textContent = _healthData.gemini_model;
+      const fallback = _healthData.fallback_model ? `\nFallback: ${_healthData.fallback_model} (Vertex AI)` : '';
+      const agents   = _healthData.agents ? `${_healthData.agents}-agent SequentialAgent` : '';
+      geminiEl.dataset.tooltip = [
+        `Model: ${_healthData.gemini_model}`,
+        agents,
+        'Adversarial debate: Optimist vs Pessimist',
+        'SSE streaming · Google Cloud ADK',
+        fallback,
+      ].filter(Boolean).join('\n');
     }
     if (pipelineEl && _healthData.agents) {
       pipelineEl.textContent = `${_healthData.agents}-agent ADK pipeline`;
@@ -210,7 +260,17 @@ async function loadStats() {
 
     const elasticEl = document.getElementById('stat-elastic');
     if (elasticEl) {
-      elasticEl.textContent = d.elastic_mcp_active ? 'Elastic MCP ✓' : 'Elastic SDK';
+      const mcpActive = d.elastic_mcp_active;
+      elasticEl.textContent = mcpActive ? 'Elastic MCP ✓' : 'Elastic SDK';
+      elasticEl.dataset.tooltip = [
+        mcpActive ? 'Agent Builder MCP: active' : 'Agent Builder MCP: unavailable (direct SDK)',
+        'RRF hybrid retrieval: BM25 + ELSER semantic',
+        'Semantic reranker (.rerank-v1-elasticsearch)',
+        'ES|QL: cross-reference + flip-fraud detection',
+        'Percolator: proactive risk-profile alerts',
+        'Geo-distance: cross-property intelligence',
+        'Significant terms: flag pattern detection',
+      ].join('\n');
     }
   } catch (_) { /* silently ignore */ }
 }
@@ -267,31 +327,46 @@ function handleEvent(evt) {
   const { type, agent, message, detail, count, summary, report, error } = evt;
 
   if (type === 'start') {
-    addLog(`▶ Starting analysis: ${evt.address || currentAddress}`, 'info');
+    addLog(`> Starting analysis: ${evt.address || currentAddress}`, 'info');
     return;
   }
 
   if (type === 'step') {
     updateAgentCard(agent, message, 'running');
-    addLog(`[${agent || '?'}] ${message}${detail ? ' — ' + detail : ''}`, detail && detail.includes('⚠') ? 'warn' : 'info');
+    addLog(`[${agent || '?'}] ${message}${detail ? ': ' + detail : ''}`, detail && detail.includes('[WARN]') ? 'warn' : 'info');
     return;
   }
 
   if (type === 'finding') {
     updateAgentCard(agent, summary, 'done');
-    addLog(`✓ ${summary}`, 'finding');
+    addLog(`+ ${summary}`, 'finding');
     return;
   }
 
   if (type === 'complete') {
     markAllDone();
-    addLog('✓ Analysis complete — rendering report', 'finding');
-    if (report) renderReport(report);
+    addLog('+ Analysis complete. Rendering report', 'finding');
+    if (report) {
+      renderReport(report);
+      // Show pending pill while DebateAgent is still running
+      if (!report.debate) {
+        const pill = document.getElementById('verdict-debate-pending');
+        if (pill) show(pill);
+      }
+    }
     return;
   }
 
   if (type === 'debate_complete') {
-    if (evt.debate) renderDebate(evt.debate);
+    if (evt.debate) {
+      const pill = document.getElementById('verdict-debate-pending');
+      if (pill) hide(pill);
+      renderDebate(evt.debate);
+      if (_currentReport) renderVerdict(_currentReport, evt.debate);
+      // Reload similar properties now that the debate-adjusted risk_level is
+      // written back to Elastic — previous call used the synthesis-level risk band
+      if (currentAddressHash) loadSimilarProperties(currentAddressHash);
+    }
     return;
   }
 
@@ -340,13 +415,53 @@ function addLog(text, cls = 'info') {
 }
 
 // ── Report rendering ───────────────────────────────────────────────────────────
+async function openStoredReport(hash) {
+  try {
+    const res = await fetch(`/api/report/${encodeURIComponent(hash)}`);
+    if (!res.ok) return;
+    const report = await res.json();
+    currentAddress = report.normalized_address || '';
+    hide(sectionSearch);
+    renderReport(report);
+  } catch (_) { /* silently ignore — fall back to landing */ }
+}
+
+async function openSharedReport(shareId) {
+  try {
+    const res = await fetch(`/api/share/${encodeURIComponent(shareId)}`);
+    if (!res.ok) {
+      toast('Shared report not found or has expired.', 'error');
+      return;
+    }
+    const report = await res.json();
+    currentAddress = report.normalized_address || '';
+    hide(sectionSearch);
+    renderReport(report);
+  } catch (_) {
+    toast('Could not load shared report.', 'error');
+  }
+}
+
 function renderReport(report) {
+  // Collapse the full agent panel into a compact log drawer
+  const drawer     = document.getElementById('log-drawer');
+  const drawerBody = document.getElementById('log-drawer-body');
+  const liveLog    = document.getElementById('live-log');
+  if (drawer && drawerBody && liveLog && liveLog.children.length > 0) {
+    // Clone all log lines into the drawer
+    drawerBody.innerHTML = liveLog.innerHTML;
+    show(drawer);
+  }
   hide(agentPanel);
   show(reportPanel);
 
-  // Track current report for action buttons
+  // Track current report for action buttons + verdict refresh on debate
+  _currentReport = report;
   currentAddressHash = report.address_hash || '';
   if (currentAddressHash) checkWatchState(currentAddressHash);
+
+  // The Verdict — lead with the buyer's decision (refined later by the debate)
+  renderVerdict(report, report.debate || null);
 
   // Address + meta
   document.getElementById('report-address').textContent = report.normalized_address || currentAddress;
@@ -360,8 +475,9 @@ function renderReport(report) {
   document.getElementById('risk-score-value').textContent = '0';
   renderGauge(score, true);  // animated; also counts up the number
   const riskBadge = document.getElementById('risk-level-badge');
-  riskBadge.textContent = report.risk_level || 'UNKNOWN';
-  riskBadge.className = `risk-level-badge ${report.risk_level || 'MEDIUM'}`;
+  const initLevel = scoreToLevel(report.buyer_risk_score) || report.risk_level || 'MEDIUM';
+  riskBadge.textContent = initLevel;
+  riskBadge.className = `risk-level-badge ${initLevel}`;
   document.getElementById('risk-summary').textContent = report.summary || '';
 
   // Flags
@@ -384,8 +500,8 @@ function renderReport(report) {
   const timeline = Array.isArray(report.timeline) ? report.timeline : [];
   if (timeline.length > 0) {
     allTimelineItems = timeline;
-    renderTimeline(timeline);
-    document.getElementById('timeline-count').textContent = `(${timeline.length} events)`;
+    const dedupedCount = renderTimeline(timeline);
+    document.getElementById('timeline-count').textContent = `(${dedupedCount} events)`;
     show(document.getElementById('timeline-section'));
   }
 
@@ -414,7 +530,10 @@ function renderReport(report) {
   renderNeighborhood(report);
 
   // Debate (may arrive later via debate_complete event — pre-render if already in report)
-  if (report.debate) renderDebate(report.debate);
+  if (report.debate) {
+    renderDebate(report.debate);
+    renderVerdict(report, report.debate);  // update header score to debate-adjusted value
+  }
 
   // Score explainer (from /api/about)
   if (report.risk_level) _renderScoreExplainer(report.risk_level);
@@ -430,6 +549,32 @@ function renderReport(report) {
   // Cross-property intelligence — load similar risk profiles from Elastic memory layer
   if (currentAddressHash) loadSimilarProperties(currentAddressHash);
 
+  // How Elastic powered THIS analysis (retrieval strategy, ES|QL, geo, percolator)
+  if (report.elastic_provenance) renderElasticProvenance(report.elastic_provenance);
+
+  // Debate fallback: if the SSE debate_complete event was missed (e.g. Gemini rate
+  // limit delayed it), poll the stored Elasticsearch report once after 10s.
+  if (!report.debate && currentAddressHash) {
+    setTimeout(async () => {
+      if (document.getElementById('debate-section')?.style.display !== 'none') return;
+      try {
+        const r = await fetch(`/api/report/${currentAddressHash}`);
+        if (!r.ok) return;
+        const stored = await r.json();
+        if (stored.debate) {
+          const pill = document.getElementById('verdict-debate-pending');
+          if (pill) hide(pill);
+          renderDebate(stored.debate);
+          renderVerdict(stored, stored.debate);  // sync header to debate-adjusted score
+          if (stored.buyer_risk_score != null) {
+            renderGauge(stored.buyer_risk_score, true);
+            _updateMapForDebate(stored.buyer_risk_score, stored.buy_recommendation);
+          }
+        }
+      } catch (_) {}
+    }, 10000);
+  }
+
   // Reload stats after report is generated
   loadStats();
 }
@@ -437,6 +582,19 @@ function renderReport(report) {
 function renderTimeline(items) {
   const container = document.getElementById('timeline');
   container.innerHTML = '';
+  // Deduplicate: collapse identical events from repeated pipeline runs.
+  // Use full description so permit events with same type but different work/status
+  // don't collapse into one entry. Only exact matches (same run re-indexing) dedup.
+  const seen = new Set();
+  const unique = items.filter(item => {
+    const key = `${item.event_type}|${item.date}|${item.description || ''}|${item.source || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  items = unique;
+  // Return deduped count for the badge
+  const _dedupedCount = items.length;
   items.forEach(item => {
     const div = document.createElement('div');
     div.className = 'timeline-item';
@@ -451,7 +609,7 @@ function renderTimeline(items) {
       : '';
 
     div.innerHTML = `
-      <div class="tl-date">${esc(item.date || '—')}</div>
+      <div class="tl-date">${esc(item.date || '-')}</div>
       <div class="tl-body">
         <div class="tl-desc">${esc(item.description || '')}</div>
         ${item.source ? `<div class="tl-source">Source: ${esc(item.source)}</div>` : ''}
@@ -461,6 +619,7 @@ function renderTimeline(items) {
     `;
     container.appendChild(div);
   });
+  return _dedupedCount;
 }
 
 function filterTimeline() {
@@ -471,6 +630,116 @@ function filterTimeline() {
       (currentFilter === 'climate_flood' && type.startsWith('climate'));
     item.classList.toggle('hidden', !visible);
   });
+}
+
+// ── Score → risk level (mirrors backend score_bands) ─────────────────────────
+function scoreToLevel(score) {
+  if (score == null || isNaN(score)) return 'MEDIUM';
+  if (score <= 30) return 'LOW';
+  if (score <= 60) return 'MEDIUM';
+  if (score <= 80) return 'HIGH';
+  return 'CRITICAL';
+}
+
+// ── The Verdict banner ─────────────────────────────────────────────────────────
+const _REC_META = {
+  BUY:       { emoji: '', label: 'BUY' },
+  NEGOTIATE: { emoji: '', label: 'NEGOTIATE' },
+  AVOID:     { emoji: '', label: 'AVOID' },
+};
+const _STRATEGY_LABEL = {
+  elastic_mcp_hybrid: 'Agent Builder MCP hybrid',
+  rrf_bm25_elser:     'RRF hybrid (BM25 ⊕ ELSER)',
+  semantic_reranker:  'semantic reranker',
+  bm25:               'BM25 keyword',
+};
+
+function renderVerdict(report, debate) {
+  const banner = document.getElementById('verdict-banner');
+  if (!banner) return;
+
+  const rec   = (debate && debate.buy_recommendation) || report.buy_recommendation || 'NEGOTIATE';
+  const conf  = (debate && debate.confidence) || report.confidence || 'MEDIUM';
+  const score = (debate && typeof debate.final_score === 'number')
+    ? debate.final_score
+    : (typeof report.buyer_risk_score === 'number' ? report.buyer_risk_score : null);
+  // Always derive level from the score being displayed so header + body stay in sync
+  const level = score != null ? scoreToLevel(score) : (report.risk_level || 'MEDIUM');
+  const rationale =
+    (debate && (debate.verdict_text || (debate.verdict && debate.verdict.verdict))) ||
+    report.summary || '';
+
+  const m = _REC_META[rec] || _REC_META.NEGOTIATE;
+  banner.className = `verdict-banner ${rec}`;
+  document.getElementById('verdict-emoji').textContent = m.emoji;
+  document.getElementById('verdict-word').textContent = m.label;
+  const scoreStr = score != null ? `Buyer Risk <strong>${score}/100</strong> · ${esc(level)}` : esc(level);
+  document.getElementById('verdict-conf-line').innerHTML =
+    `${scoreStr} · Confidence <strong>${esc(conf)}</strong>`;
+  document.getElementById('verdict-rationale').textContent = rationale;
+
+  // Honest stat chips — every value derives from real report data
+  const chips = [];
+  const flagCount = Array.isArray(report.flags) ? report.flags.length : 0;
+  const tlCount   = Array.isArray(report.timeline) ? report.timeline.length : 0;
+  const srcCount  = Array.isArray(report.data_sources) ? report.data_sources.length : 0;
+  if (flagCount) chips.push(`<span class="verdict-chip"><strong>${flagCount}</strong> material risk${flagCount > 1 ? 's' : ''} found</span>`);
+  if (tlCount)   chips.push(`<span class="verdict-chip"><strong>${tlCount}</strong> dated records</span>`);
+  if (srcCount)  chips.push(`<span class="verdict-chip"><strong>${srcCount}</strong> data sources</span>`);
+  const strat = report.elastic_provenance && report.elastic_provenance.retrieval_strategy;
+  if (strat) chips.push(`<span class="verdict-chip chip-elastic">Retrieval: <strong>${esc(_STRATEGY_LABEL[strat] || strat)}</strong></span>`);
+  document.getElementById('verdict-chips').innerHTML = chips.join('');
+
+  show(banner);
+}
+
+// ── Debate tug-of-war: Optimist vs Pessimist move the score synthesis → final ──
+function renderTug(debate) {
+  const tug = document.getElementById('debate-tug');
+  if (!tug || !_currentReport) return;
+  const final = typeof debate.final_score === 'number' ? debate.final_score : null;
+  if (final === null) return;   // nothing meaningful without a final score
+
+  const clamp = v => Math.max(0, Math.min(100, v));
+  const initial = typeof _currentReport.buyer_risk_score === 'number' ? _currentReport.buyer_risk_score : null;
+  const opt = debate.optimist  && typeof debate.optimist.adjusted_score  === 'number' ? debate.optimist.adjusted_score  : null;
+  const pes = debate.pessimist && typeof debate.pessimist.adjusted_score === 'number' ? debate.pessimist.adjusted_score : null;
+
+  const setMarker = (id, v) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (v === null) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.style.left = clamp(v) + '%';
+  };
+
+  document.getElementById('tug-opt-score').textContent = opt !== null ? `${opt}/100` : '-';
+  document.getElementById('tug-pes-score').textContent = pes !== null ? `${pes}/100` : '-';
+  setMarker('tug-marker-opt', opt);
+  setMarker('tug-marker-pes', pes);
+  document.getElementById('tug-final-val').textContent = final;
+
+  const initEl = document.getElementById('tug-marker-init');
+  const finalEl = document.getElementById('tug-marker-final');
+  show(tug);
+
+  // Animate: final marker starts at the synthesis score, then slides to the verdict
+  if (initial !== null && initial !== final) {
+    initEl.style.display = '';
+    initEl.style.left = clamp(initial) + '%';
+    finalEl.style.left = clamp(initial) + '%';
+    void finalEl.offsetWidth;  // force reflow so the transition runs
+    requestAnimationFrame(() => { finalEl.style.left = clamp(final) + '%'; });
+  } else {
+    initEl.style.display = 'none';
+    finalEl.style.left = clamp(final) + '%';
+  }
+
+  const parts = [];
+  if (initial !== null) parts.push(`SynthesisAgent proposed <strong>${initial}/100</strong>.`);
+  if (opt !== null && pes !== null) parts.push(`OptimistAgent pulled toward <strong>${opt}</strong>, PessimistAgent toward <strong>${pes}</strong>.`);
+  parts.push(`Confidence-adjusted verdict: <strong>${final}/100</strong>.`);
+  document.getElementById('tug-caption').innerHTML = parts.join(' ');
 }
 
 // ── Debate rendering ──────────────────────────────────────────────────────────
@@ -497,18 +766,30 @@ function renderDebate(debate) {
 
   if (opt.argument) {
     document.getElementById('optimist-body').textContent = opt.argument;
-    document.getElementById('optimist-score').textContent = `Suggested score: ${opt.adjusted_score ?? '—'}/100`;
+    document.getElementById('optimist-score').textContent = `Suggested score: ${opt.adjusted_score ?? '-'}/100`;
     show(document.getElementById('debate-optimist'));
   }
   if (pes.argument) {
     document.getElementById('pessimist-body').textContent = pes.argument;
-    document.getElementById('pessimist-score').textContent = `Suggested score: ${pes.adjusted_score ?? '—'}/100`;
+    document.getElementById('pessimist-score').textContent = `Suggested score: ${pes.adjusted_score ?? '-'}/100`;
     show(document.getElementById('debate-pessimist'));
   }
 
-  // Animate gauge to the debated final score
+  // Animate gauge to the debated final score and sync the map legend
   if (finalScore !== undefined) {
     renderGauge(finalScore, true);
+    _updateMapForDebate(finalScore, rec);
+  }
+
+  // Refresh the Verdict banner with the debate's final recommendation + score
+  if (_currentReport) renderVerdict(_currentReport, debate);
+
+  // Tug-of-war visualisation of how the debate moved the score
+  renderTug(debate);
+
+  // Percolator alerts arrive live with the debate result
+  if (Array.isArray(debate.percolator_matches)) {
+    renderPercolatorAlerts(debate.percolator_matches);
   }
 
   show(section);
@@ -525,18 +806,17 @@ function renderNeighborhood(report) {
   if (!grid || !section) return;
 
   const items = [
-    { icon: '💨', label: 'Air Quality (PM2.5)', value: n.pm25 != null ? `${n.pm25.toFixed(1)} µg/m³` : '—', ok: (n.pm25 || 0) <= 12 },
-    { icon: '☣', label: 'Superfund Proximity', value: n.superfund_proximity != null ? `${Math.round(n.superfund_proximity)}/100` : '—', ok: (n.superfund_proximity || 0) < 40 },
-    { icon: '🚗', label: 'Traffic Pollution', value: n.traffic_proximity != null ? `${Math.round(n.traffic_proximity)}/100` : '—', ok: (n.traffic_proximity || 0) < 60 },
-    { icon: '🏫', label: 'Schools Nearby', value: n.schools_nearby != null ? `${n.schools_nearby}` : '—', ok: (n.schools_nearby || 0) > 0 },
-    { icon: '🌳', label: 'Parks Nearby', value: n.parks_nearby != null ? `${n.parks_nearby}` : '—', ok: (n.parks_nearby || 0) > 0 },
-    { icon: '🚌', label: 'Transit Stops', value: n.transit_nearby != null ? `${n.transit_nearby}` : '—', ok: (n.transit_nearby || 0) > 1 },
-    { icon: '🏘', label: 'Neighbourhood Score', value: n.neighborhood_score != null ? `${n.neighborhood_score}/100` : '—', ok: (n.neighborhood_score || 0) >= 60 },
+    { label: 'Air Quality (PM2.5)', value: n.pm25 != null ? `${n.pm25.toFixed(1)} µg/m³` : '-', ok: (n.pm25 || 0) <= 12 },
+    { label: 'Superfund Proximity', value: n.superfund_proximity != null ? `${Math.round(n.superfund_proximity)}/100` : '-', ok: (n.superfund_proximity || 0) < 40 },
+    { label: 'Traffic Pollution', value: n.traffic_proximity != null ? `${Math.round(n.traffic_proximity)}/100` : '-', ok: (n.traffic_proximity || 0) < 60 },
+    { label: 'Schools Nearby', value: n.schools_nearby != null ? `${n.schools_nearby}` : '-', ok: (n.schools_nearby || 0) > 0 },
+    { label: 'Parks Nearby', value: n.parks_nearby != null ? `${n.parks_nearby}` : '-', ok: (n.parks_nearby || 0) > 0 },
+    { label: 'Transit Stops', value: n.transit_nearby != null ? `${n.transit_nearby}` : '-', ok: (n.transit_nearby || 0) > 1 },
+    { label: 'Neighbourhood Score', value: n.neighborhood_score != null ? `${n.neighborhood_score}/100` : '-', ok: (n.neighborhood_score || 0) >= 60 },
   ];
 
   grid.innerHTML = items.map(item => `
     <div class="nbhd-card ${item.ok ? 'good' : 'warn'}">
-      <div class="nbhd-icon">${item.icon}</div>
       <div class="nbhd-label">${item.label}</div>
       <div class="nbhd-value">${item.value}</div>
     </div>
@@ -557,6 +837,7 @@ function renderEscapePlan(steps) {
 
 // ── Neighborhood map (Leaflet.js) ────────────────────────────────────────────
 let _map = null;
+let _mapMarker = null;
 
 function renderMap(report) {
   const lat = report.lat;
@@ -584,7 +865,7 @@ function renderMap(report) {
     const riskColors = { LOW: '#22c55e', MEDIUM: '#eab308', HIGH: '#f97316', CRITICAL: '#ef4444' };
     const level  = report.risk_level || 'MEDIUM';
     const color  = riskColors[level] || '#64748b';
-    const score  = report.buyer_risk_score ?? '—';
+    const score  = report.buyer_risk_score ?? '-';
 
     // Property pin
     const icon = L.divIcon({
@@ -592,7 +873,7 @@ function renderMap(report) {
       html: `<div style="background:${color};width:22px;height:22px;border-radius:50%;border:3px solid white;box-shadow:0 2px 10px rgba(0,0,0,0.45);"></div>`,
       iconSize: [22, 22], iconAnchor: [11, 11],
     });
-    L.marker([lat, lng], { icon })
+    _mapMarker = L.marker([lat, lng], { icon })
      .addTo(_map)
      .bindPopup(`<strong>${esc(report.normalized_address || '')}</strong><br>Risk Score: <strong>${score}/100</strong> · ${level}`)
      .openPopup();
@@ -654,18 +935,306 @@ function renderSimilarProperties(data) {
     const color = riskColors[lvl] || '#64748b';
     const flags = (p.flags || []).slice(0, 2);
     const loc   = [p.county, p.state].filter(Boolean).join(', ');
+    const dist  = (typeof p.distance_km === 'number')
+      ? `<div class="similar-dist">📍 ${p.distance_km} km away · geo_distance</div>` : '';
     return `
       <div class="similar-card">
-        <div class="similar-score" style="color:${color}">${p.buyer_risk_score ?? '—'}<span>/100</span></div>
+        <div class="similar-score" style="color:${color}">${p.buyer_risk_score ?? '-'}<span>/100</span></div>
         <div class="similar-level" style="color:${color}">${esc(lvl)}</div>
-        <div class="similar-addr">${esc(p.normalized_address || p.address_hash || '—')}</div>
+        <div class="similar-addr">${esc(p.normalized_address || p.address_hash || '-')}</div>
         ${loc ? `<div class="similar-loc">${esc(loc)}</div>` : ''}
+        ${dist}
         ${flags.map(f => `<div class="similar-flag">⚠ ${esc(f)}</div>`).join('')}
       </div>
     `;
   }).join('');
 
+  // Surface the retrieval method (geo vs risk-band) on the badge, data-driven.
+  if (badge && data.method) {
+    const label = data.method === 'geo_distance' ? 'geo_distance' :
+                  data.method === 'risk_level_esql' ? 'ES|QL risk band' : '';
+    if (label) badge.textContent = `${props.length} found · ${label}`;
+  }
+
   show(section);
+}
+
+// ── Update map legend + risk badge after debate adjusts the score ─────────────
+function _updateMapForDebate(finalScore, buyRec) {
+  const riskColors = { LOW: '#22c55e', MEDIUM: '#eab308', HIGH: '#f97316', CRITICAL: '#ef4444' };
+  const recLevel = scoreToLevel(finalScore);
+  const color = riskColors[recLevel] || '#64748b';
+  const legendEl = document.getElementById('map-legend');
+  if (legendEl) {
+    const fzChip = legendEl.querySelector('.map-legend-item:last-child');
+    const fzHtml = fzChip && fzChip.innerHTML.includes('FEMA') ? fzChip.outerHTML : '';
+    legendEl.innerHTML = `
+      <span class="map-legend-item"><span style="background:${color}" class="map-legend-dot"></span>${recLevel} risk · ${finalScore}/100 <em style="font-size:.7rem;opacity:.7">(debate-adjusted)</em></span>
+      <span class="map-legend-item"><span class="map-legend-ring" style="border-color:${color}"></span>500m analysis radius</span>
+      ${fzHtml}
+    `;
+  }
+  // Update the map marker popup to reflect the debate-adjusted score
+  if (_mapMarker) {
+    const addr = _mapMarker.getPopup()?.getContent()?.split('<br>')[0] || '';
+    _mapMarker.setPopupContent(
+      `${addr}<br>Risk Score: <strong>${finalScore}/100</strong> · ${recLevel} <em style="font-size:.75em;opacity:.8">(debate-adjusted)</em>`
+    );
+  }
+  // Also update the risk badge at the top of the report
+  const badge = document.getElementById('risk-level-badge');
+  if (badge) {
+    badge.textContent = recLevel;
+    badge.className = `risk-level-badge ${recLevel}`;
+  }
+}
+
+// ── Elastic provenance (per-report: how Elastic powered this analysis) ────────
+function renderPercolatorAlerts(matches) {
+  const wrap = document.getElementById('elastic-alerts');
+  const section = document.getElementById('elastic-prov-section');
+  if (!wrap || !Array.isArray(matches) || matches.length === 0) return;
+  const sevColor = { CRITICAL: 'var(--danger)', HIGH: 'var(--orange)', MEDIUM: 'var(--warn)', LOW: 'var(--text2)' };
+  wrap.innerHTML = `
+    <div class="el-alert-head">${matches.length} saved risk profile${matches.length > 1 ? 's' : ''} matched
+      <span class="el-alert-tag">Elastic percolator</span></div>
+    ${matches.map(m => `
+      <div class="el-alert" style="border-left-color:${sevColor[m.severity] || 'var(--text2)'}">
+        <span class="el-alert-name" style="color:${sevColor[m.severity] || 'var(--text2)'}">${esc(m.alert_name || 'Alert')}</span>
+        <span class="el-alert-desc">${esc(m.description || '')}</span>
+      </div>`).join('')}
+  `;
+  if (section) show(section);
+}
+
+const _STRATEGY_LABELS = {
+  elastic_mcp_hybrid: 'Elastic Agent Builder MCP hybrid search',
+  rrf_bm25_elser:     'RRF hybrid retriever (BM25 ⊕ ELSER)',
+  semantic_reranker:  'ELSER + semantic reranker',
+  bm25:               'BM25 keyword',
+  unavailable:        'Elastic unavailable',
+};
+
+function renderElasticProvenance(prov) {
+  const section = document.getElementById('elastic-prov-section');
+  const grid    = document.getElementById('elastic-prov-grid');
+  const esqlEl  = document.getElementById('elastic-esql-list');
+  if (!section || !grid || !prov) return;
+
+  // Percolator matches may live in provenance (report-fetch path)
+  if (Array.isArray(prov.percolator_matches)) renderPercolatorAlerts(prov.percolator_matches);
+
+  const tiles = [
+    { label: 'Retrieval strategy', value: _STRATEGY_LABELS[prov.retrieval_strategy] || prov.retrieval_strategy || '-' },
+    { label: 'Events retrieved',   value: prov.events_retrieved ?? '-' },
+    { label: 'ES|QL queries run',  value: Array.isArray(prov.esql_queries) ? prov.esql_queries.length : (prov.esql_queries ?? 0) },
+    { label: 'Geo cross-refs (50km)', value: prov.geo_nearby_count ?? 0 },
+    { label: 'Significant terms',  value: prov.significant_terms_count ?? 0 },
+    { label: 'MCP active',         value: prov.mcp_active ? 'Yes' : 'Direct SDK' },
+  ];
+  grid.innerHTML = tiles.map(t => `
+    <div class="el-prov-tile">
+      <div class="el-prov-val">${esc(String(t.value))}</div>
+      <div class="el-prov-label">${esc(t.label)}</div>
+    </div>
+  `).join('');
+
+  // ES|QL queries actually executed for this property, with row counts
+  if (esqlEl && Array.isArray(prov.esql_queries) && prov.esql_queries.length) {
+    esqlEl.innerHTML = `
+      <div class="el-esql-head">ES|QL queries executed against Elasticsearch for this property</div>
+      ${prov.esql_queries.map(q => `
+        <div class="el-esql-item">
+          <div class="el-esql-name">${esc(q.name || 'Query')} <span class="el-esql-rows">${q.row_count} row${q.row_count === 1 ? '' : 's'}</span></div>
+          <code class="el-esql-code">${esc(q.query || '')}</code>
+        </div>`).join('')}
+    `;
+  } else if (esqlEl) {
+    esqlEl.innerHTML = '';
+  }
+
+  show(section);
+}
+
+// ── Elastic Intelligence dashboard (modal, 100% API-driven) ───────────────────
+function initElasticDashboard() {
+  const modal = document.getElementById('modal-elastic');
+  const open  = document.getElementById('btn-elastic-nav');
+  const close = document.getElementById('modal-elastic-close');
+  if (!modal || !open) return;
+  open.addEventListener('click', openElasticDashboard);
+  close?.addEventListener('click', () => hide(modal));
+  modal.addEventListener('click', e => { if (e.target === modal) hide(modal); });
+}
+
+async function openElasticDashboard() {
+  const modal   = document.getElementById('modal-elastic');
+  const loading = document.getElementById('el-dash-loading');
+  const dash    = document.getElementById('el-dash');
+  show(modal);
+  show(loading); hide(dash);
+  try {
+    const [statusRes, insightsRes] = await Promise.all([
+      fetch('/api/elastic/status'),
+      fetch('/api/elastic/insights'),
+    ]);
+    const status   = await statusRes.json();
+    const insights = insightsRes.ok ? await insightsRes.json() : { available: false };
+    renderElasticStatus(status);
+    renderElasticInsights(insights);
+    hide(loading); show(dash);
+  } catch (err) {
+    if (loading) loading.textContent = 'Could not load Elastic status. Check the connection.';
+  }
+}
+
+function renderElasticStatus(s) {
+  // Connection status row
+  const statusRow = document.getElementById('el-status-row');
+  if (statusRow) {
+    const mcpOk = s.elastic_mcp && s.elastic_mcp.startsWith('connected');
+    statusRow.innerHTML = `
+      <div class="el-status-pill ${s.elastic_connected ? 'ok' : 'off'}">${s.elastic_connected ? '● Connected' : '○ Offline'} · Elasticsearch</div>
+      <div class="el-status-pill ${mcpOk ? 'ok' : 'warn'}">${mcpOk ? '● MCP connected' : '○ Direct SDK'} · Agent Builder</div>
+      <div class="el-status-pill ${s.percolator_ready ? 'ok' : 'warn'}">${s.percolator_ready ? '● Active' : '○ Inactive'} · Percolator alerts</div>
+    `;
+  }
+
+  // Capability cards grouped by category — live ✓/✗
+  const grid = document.getElementById('el-cap-grid');
+  const sub  = document.getElementById('el-cap-sub');
+  const caps = s.capabilities || [];
+  if (sub) sub.textContent = `${caps.filter(c => c.active).length}/${caps.length} active`;
+  if (grid) {
+    grid.innerHTML = caps.map(c => `
+      <div class="el-cap-card ${c.active ? 'active' : 'inactive'}">
+        <div class="el-cap-top">
+          <span class="el-cap-dot ${c.active ? 'on' : 'off'}"></span>
+          <span class="el-cap-cat">${esc(c.category || '')}</span>
+        </div>
+        <div class="el-cap-label">${esc(c.label || c.id)}</div>
+        <div class="el-cap-detail">${esc(c.detail || '')}</div>
+      </div>
+    `).join('');
+  }
+
+  // Index document counts
+  const idxGrid = document.getElementById('el-idx-grid');
+  const counts  = s.index_document_counts || {};
+  const descs   = s.indices || {};
+  if (idxGrid) {
+    idxGrid.innerHTML = Object.keys(descs).map(idx => {
+      const n = counts[idx];
+      const display = (n === undefined || n < 0) ? '-' : Number(n).toLocaleString();
+      return `
+        <div class="el-idx-card">
+          <div class="el-idx-count">${display}</div>
+          <div class="el-idx-name">${esc(idx)}</div>
+          <div class="el-idx-desc">${esc(descs[idx] || '')}</div>
+        </div>`;
+    }).join('');
+  }
+
+  // MCP + Agent Builder tools + ES|QL queries + retrieval strategies
+  const mcpEl = document.getElementById('el-mcp');
+  if (mcpEl) {
+    const tools  = s.elastic_mcp_tools || [];
+    const abt    = s.agent_builder_tools || [];
+    const esql   = s.esql_queries || [];
+    const strats = s.retrieval_strategies || [];
+    const chips = arr => arr.length
+      ? arr.map(t => `<span class="el-chip">${esc(t)}</span>`).join('')
+      : '<span class="el-chip el-chip-empty">none discovered</span>';
+    mcpEl.innerHTML = `
+      <div class="el-mcp-block">
+        <div class="el-mcp-key">MCP endpoint</div>
+        <code class="el-mcp-val">${esc(s.elastic_mcp_endpoint || 'not configured')}</code>
+      </div>
+      <div class="el-mcp-block"><div class="el-mcp-key">Discovered MCP tools</div><div class="el-chips">${chips(tools)}</div></div>
+      <div class="el-mcp-block"><div class="el-mcp-key">Custom Agent Builder tools (provisioned)</div><div class="el-chips">${chips(abt)}</div></div>
+      <div class="el-mcp-block"><div class="el-mcp-key">Retrieval strategy ladder</div><div class="el-chips">${chips(strats)}</div></div>
+      <div class="el-mcp-block"><div class="el-mcp-key">ES|QL queries per analysis</div><div class="el-chips">${chips(esql)}</div></div>
+      <div class="el-mcp-block">
+        <div class="el-mcp-key">Inference endpoints</div>
+        <div class="el-chips">
+          <span class="el-chip">${esc(s.elser_inference_endpoint || '')}</span>
+          <span class="el-chip">${esc(s.reranking_inference_endpoint || '')}</span>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function renderElasticInsights(data) {
+  const el = document.getElementById('el-insights');
+  if (!el) return;
+  if (!data || !data.available) {
+    el.innerHTML = '<p class="el-empty">No analyses indexed yet. Run a property to populate cross-property intelligence.</p>';
+    return;
+  }
+  const ins = data.insights || {};
+  const stats = ins.score_stats || {};
+  const pct   = ins.score_percentiles || {};
+  const riskColors = { LOW: '#22c55e', MEDIUM: '#eab308', HIGH: '#f97316', CRITICAL: '#ef4444' };
+
+  // Headline stat tiles
+  const tiles = `
+    <div class="el-ins-tiles">
+      <div class="el-ins-tile"><div class="el-ins-num">${stats.count != null ? Number(stats.count).toLocaleString() : '-'}</div><div class="el-ins-lbl">Properties analysed</div></div>
+      <div class="el-ins-tile"><div class="el-ins-num">${stats.avg != null ? Math.round(stats.avg) : '-'}</div><div class="el-ins-lbl">Avg risk score</div></div>
+      <div class="el-ins-tile"><div class="el-ins-num">${pct['90.0'] != null ? Math.round(pct['90.0']) : (pct['90'] != null ? Math.round(pct['90']) : '-')}</div><div class="el-ins-lbl">90th pct score</div></div>
+      <div class="el-ins-tile"><div class="el-ins-num">${ins.unique_counties != null ? ins.unique_counties : '-'}</div><div class="el-ins-lbl">Unique counties</div></div>
+    </div>`;
+
+  // Risk-level distribution bars
+  const dist = ins.risk_level_distribution || [];
+  const distMax = Math.max(1, ...dist.map(d => d.count));
+  const distHtml = dist.length ? `
+    <div class="el-ins-block">
+      <div class="el-ins-h">Risk-level distribution <span class="el-sub">terms aggregation</span></div>
+      ${dist.map(d => `
+        <div class="el-bar-row">
+          <span class="el-bar-key" style="color:${riskColors[d.key] || 'var(--text2)'}">${esc(d.key)}</span>
+          <span class="el-bar-track"><span class="el-bar-fill" style="width:${(d.count / distMax * 100).toFixed(0)}%;background:${riskColors[d.key] || 'var(--accent)'}"></span></span>
+          <span class="el-bar-val">${d.count}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  // Top flags
+  const flags = ins.top_flags || [];
+  const flagMax = Math.max(1, ...flags.map(f => f.count));
+  const flagsHtml = flags.length ? `
+    <div class="el-ins-block">
+      <div class="el-ins-h">Most common risk flags <span class="el-sub">terms aggregation</span></div>
+      ${flags.map(f => `
+        <div class="el-bar-row">
+          <span class="el-bar-key el-bar-key-wide">${esc(f.key)}</span>
+          <span class="el-bar-track"><span class="el-bar-fill" style="width:${(f.count / flagMax * 100).toFixed(0)}%"></span></span>
+          <span class="el-bar-val">${f.count}</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  // Top states
+  const states = ins.top_states || [];
+  const statesHtml = states.length ? `
+    <div class="el-ins-block">
+      <div class="el-ins-h">Top states <span class="el-sub">terms aggregation</span></div>
+      <div class="el-chips">${states.map(st => `<span class="el-chip">${esc(st.key)} · ${st.count}</span>`).join('')}</div>
+    </div>` : '';
+
+  // Significant terms by band
+  const sig = data.significant_terms_by_band || {};
+  const sigHtml = Object.keys(sig).length ? `
+    <div class="el-ins-block">
+      <div class="el-ins-h">Statistically distinctive flags by band <span class="el-sub">significant_terms</span></div>
+      ${Object.entries(sig).map(([band, items]) => `
+        <div class="el-sig-band">
+          <span class="el-sig-band-name" style="color:${riskColors[band] || 'var(--text2)'}">${esc(band)}</span>
+          <div class="el-chips">${items.map(i => `<span class="el-chip">${esc(i.flag)} <em>×${i.score}</em></span>`).join('')}</div>
+        </div>`).join('')}
+    </div>` : '';
+
+  el.innerHTML = tiles + distHtml + flagsHtml + statesHtml + sigHtml;
 }
 
 // ── Q&A panel ─────────────────────────────────────────────────────────────────
@@ -692,7 +1261,7 @@ function initQA() {
       addQAMessage(data.answer || 'No answer returned.', 'assistant');
     } catch (err) {
       removeQAMessage(thinkingId);
-      addQAMessage('Could not get an answer — please try again.', 'assistant error');
+      addQAMessage('Could not get an answer. Please try again.', 'assistant error');
     }
   };
 
@@ -764,6 +1333,8 @@ function showSearch() {
   hide(agentPanel);
   hide(reportPanel);
   hide(errorPanel);
+  const drawer = document.getElementById('log-drawer');
+  if (drawer) hide(drawer);
   show(sectionSearch);
   addressInput.focus();
 }
@@ -789,7 +1360,7 @@ function formatCurrency(n) {
 // ── Theme ─────────────────────────────────────────────────────────────────────
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  btnTheme.textContent = theme === 'dark' ? '☀' : '☾';
+  btnTheme.textContent = theme === 'dark' ? 'Light' : 'Dark';
   localStorage.setItem('bp-theme', theme);
 }
 function toggleTheme() {
@@ -807,7 +1378,7 @@ async function shareReport(addressHash) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     input.value = data.url || '';
-    toast('Share link created — valid for 90 days', 'success');
+    toast('Share link created, valid for 90 days', 'success');
   } catch (err) {
     input.value = '';
     toast('Could not create share link: ' + err.message, 'error');
@@ -864,7 +1435,7 @@ async function toggleWatch(addressHash, address) {
       currentWatched = true;
       btn.textContent = 'Watching ✓';
       btn.classList.add('btn-action-active');
-      toast('Added to watchlist — re-analysed every 24 h', 'success');
+      toast('Added to watchlist, re-analysed every 24 h', 'success');
     }
   } catch (err) {
     toast('Watchlist update failed: ' + err.message, 'error');
@@ -900,9 +1471,9 @@ async function openWatchlist() {
       <div class="wl-item">
         <div class="wl-addr">${esc(item.normalized_address || item.address_hash)}</div>
         <div class="wl-meta">
-          Watching since ${item.watched_at ? new Date(item.watched_at).toLocaleDateString() : '—'}
+          Watching since ${item.watched_at ? new Date(item.watched_at).toLocaleDateString() : '-'}
           &nbsp;·&nbsp;
-          Last checked: ${item.last_checked ? new Date(item.last_checked).toLocaleDateString() : '—'}
+          Last checked: ${item.last_checked ? new Date(item.last_checked).toLocaleDateString() : '-'}
         </div>
         <button class="btn-ghost btn-wl-remove" data-hash="${esc(item.address_hash)}">Remove</button>
       </div>
@@ -967,7 +1538,6 @@ function _renderHiwPipeline(about) {
     <div class="hiw-step">
       <div class="hiw-num">${i + 1}</div>
       <div class="hiw-body">
-        <span class="hiw-agent-icon">${esc(a.icon || '')}</span>
         <strong>${esc(a.name)}</strong>
         ${esc(a.role)}
       </div>
@@ -981,7 +1551,7 @@ function _renderHiwPipeline(about) {
     footer.innerHTML = `
       <p><strong>Elastic capabilities:</strong> ${esc(caps)}</p>
       <p><strong>Coverage tiers:</strong> ${esc(tiers)}</p>
-      <p><strong>Model:</strong> ${esc(_healthData.gemini_model || '—')} &nbsp;|&nbsp; <strong>Fallback:</strong> ${esc(_healthData.fallback_model || '—')}</p>
+      <p><strong>Model:</strong> ${esc(_healthData.gemini_model || '-')} &nbsp;|&nbsp; <strong>Fallback:</strong> ${esc(_healthData.fallback_model || '-')}</p>
     `;
   }
 }
@@ -1003,7 +1573,6 @@ function _renderHiwScore(about) {
   if (factorsEl) {
     factorsEl.innerHTML = (about.risk_factors || []).map(f => `
       <div class="hiw-factor">
-        <div class="hiw-factor-icon">${esc(f.icon || '')}</div>
         <div class="hiw-factor-body">
           <div class="hiw-factor-name">${esc(f.factor)} <span class="hiw-weight weight-${f.weight.toLowerCase()}">${esc(f.weight)}</span></div>
           <div class="hiw-factor-detail">${esc(f.detail)}</div>
@@ -1018,7 +1587,6 @@ function _renderHiwSources(about) {
   if (!el) return;
   el.innerHTML = (about.data_sources || []).map(s => `
     <div class="hiw-source-card">
-      <div class="hiw-source-icon">${esc(s.icon || '')}</div>
       <div class="hiw-source-body">
         <div class="hiw-source-name">${esc(s.name)}</div>
         <div class="hiw-source-coverage">Coverage: ${esc(s.coverage)} · ${esc(s.freshness)}</div>
@@ -1035,7 +1603,7 @@ function _renderHiwGlossary(about) {
   el.innerHTML = (about.glossary || []).map(g => `
     <details class="glossary-item">
       <summary class="glossary-term">
-        ${esc(g.term)} <span class="glossary-short">— ${esc(g.short)}</span>
+        ${esc(g.term)} <span class="glossary-short">· ${esc(g.short)}</span>
       </summary>
       <div class="glossary-detail">${esc(g.detail)}</div>
     </details>
@@ -1098,7 +1666,6 @@ function _renderHowSection(steps, debateCallout) {
   stepsEl.innerHTML = steps.map(s => `
     <div class="how-step">
       <div class="how-step-num">${esc(String(s.step))}</div>
-      <div class="how-step-icon">${esc(s.icon)}</div>
       <div class="how-step-body">
         <div class="how-step-title">${esc(s.title)}</div>
         <div class="how-step-detail">${esc(s.detail)}</div>
@@ -1116,7 +1683,6 @@ function _renderChecksGrid(factors) {
   const weightColor = { HIGH: 'var(--danger)', MEDIUM: 'var(--warn)', LOW: 'var(--text2)' };
   grid.innerHTML = factors.map(f => `
     <div class="check-card">
-      <div class="check-icon">${esc(f.icon || '')}</div>
       <div class="check-body">
         <div class="check-name">
           ${esc(f.factor)}
@@ -1137,7 +1703,6 @@ function _renderTrustStripInline(sources) {
   if (!strip || !section || !sources.length) return;
   strip.innerHTML = sources.map(s => `
     <div class="trust-item" title="${esc(s.what)}">
-      <span class="trust-icon">${esc(s.icon || '')}</span>
       <span class="trust-name">${esc(s.name)}</span>
     </div>
   `).join('');
@@ -1176,7 +1741,6 @@ async function _renderProvenanceStrip(dataSources) {
     );
     return `
       <div class="prov-item" title="${known ? esc(known.what) : ''}">
-        <span class="prov-icon">${known ? esc(known.icon) : '📄'}</span>
         <span class="prov-name">${esc(sourceName)}</span>
         ${known ? `<span class="prov-freshness">${esc(known.freshness)}</span>` : ''}
       </div>
@@ -1256,12 +1820,12 @@ function renderCompareResults(data) {
 
   const recommended = rec.recommended || 'NEITHER';
   const recColors   = { A: 'var(--success)', B: 'var(--accent)', NEITHER: 'var(--warn)' };
-  const recEmoji    = { A: '🏆', B: '🏆', NEITHER: '🤝' };
+  const recEmoji    = { A: '', B: '', NEITHER: '' };
   const recLabel    = recommended === 'A'
     ? (a.normalized_address || 'Property A')
     : recommended === 'B'
     ? (b.normalized_address || 'Property B')
-    : 'Neither — proceed with caution';
+    : 'Neither; proceed with caution';
 
   const verdictEl = document.getElementById('compare-verdict');
   verdictEl.innerHTML = `
@@ -1269,10 +1833,10 @@ function renderCompareResults(data) {
       <div class="cmp-verdict-emoji">${recEmoji[recommended]}</div>
       <div class="cmp-verdict-content">
         <div class="cmp-verdict-label">Our recommendation: <strong style="color:${recColors[recommended]}">${recLabel}</strong></div>
-        <div class="cmp-verdict-conf">Confidence: ${esc(rec.confidence || '—')}</div>
+        <div class="cmp-verdict-conf">Confidence: ${esc(rec.confidence || '-')}</div>
         <div class="cmp-verdict-headline">${esc(rec.headline || '')}</div>
         <p class="cmp-verdict-rationale">${esc(rec.rationale || '')}</p>
-        ${rec.deal_breaker ? `<div class="cmp-deal-breaker">⚠ Deal-breaker: ${esc(rec.deal_breaker)}</div>` : ''}
+        ${rec.deal_breaker ? `<div class="cmp-deal-breaker">Deal-breaker: ${esc(rec.deal_breaker)}</div>` : ''}
       </div>
     </div>
   `;
@@ -1284,7 +1848,7 @@ function renderCompareResults(data) {
 }
 
 function renderCompareCol(el, report, label, recommended, pros, cons) {
-  const score   = typeof report.buyer_risk_score === 'number' ? report.buyer_risk_score : '—';
+  const score   = typeof report.buyer_risk_score === 'number' ? report.buyer_risk_score : '-';
   const level   = report.risk_level || 'UNKNOWN';
   const isWinner = recommended === label;
   const levelClass = level.toLowerCase();
@@ -1300,15 +1864,15 @@ function renderCompareCol(el, report, label, recommended, pros, cons) {
 
   const flags = (report.flags || []).slice(0, 3);
   const flagsHtml = flags.length
-    ? `<div class="cmp-flags">${flags.map(f => `<div class="cmp-flag">⚠ ${esc(f)}</div>`).join('')}</div>`
+    ? `<div class="cmp-flags">${flags.map(f => `<div class="cmp-flag">${esc(f)}</div>`).join('')}</div>`
     : '';
 
-  const nbhdScore = nbhd.neighborhood_score != null ? `${nbhd.neighborhood_score}/100` : '—';
-  const debateRec = debate.buy_recommendation ? `${debate.buy_recommendation} (${debate.confidence || '?'})` : '—';
+  const nbhdScore = nbhd.neighborhood_score != null ? `${nbhd.neighborhood_score}/100` : '-';
+  const debateRec = debate.buy_recommendation ? `${debate.buy_recommendation} (${debate.confidence || '?'})` : '-';
 
   el.innerHTML = `
     <div class="cmp-col-inner ${isWinner ? 'cmp-winner' : ''}">
-      ${isWinner ? '<div class="cmp-winner-badge">🏆 Recommended</div>' : ''}
+      ${isWinner ? '<div class="cmp-winner-badge">Recommended</div>' : ''}
       <div class="cmp-col-label">Property ${label}</div>
       <div class="cmp-addr">${esc(report.normalized_address || 'Unknown')}</div>
       <div class="cmp-score risk-${levelClass}">

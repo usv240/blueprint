@@ -14,6 +14,18 @@ Type any US address. BLUEPRINT's pipeline retrieves deed history, building permi
 
 ---
 
+## Architecture & technology
+
+| Capability | How BLUEPRINT delivers it |
+|---|---|
+| **Powered by Gemini** | Gemini 3 Flash Preview drives synthesis, the adversarial debate, comparison, and Q&A — with automatic Vertex AI (Gemini 2.5 Flash) fallback |
+| **Google Cloud Agent Builder** | Built on Google's **Agent Development Kit (ADK 2.0)** — the open-source framework behind Vertex AI Agent Builder / Agent Engine — orchestrating a 7-agent `SequentialAgent`; deploys to Google Cloud Run |
+| **Partner MCP integration** | **Elastic Agent Builder MCP** (Streamable HTTP) for hybrid search + ES\|QL, plus custom ES\|QL tools provisioned into Agent Builder via the Kibana API |
+| **Only Google + partner AI** | Gemini (Google) for generation; Elastic's built-in AI (ELSER, `.rerank-v1-elasticsearch`) for retrieval. No third-party AI |
+| **Web platform, public repo, OSI license** | FastAPI + vanilla-JS SPA on Cloud Run; Apache 2.0 |
+
+---
+
 ## What it does
 
 A buyer types any US residential address. BLUEPRINT's 7-agent Google ADK pipeline runs in sequence, streaming live progress to the browser via Server-Sent Events:
@@ -22,7 +34,7 @@ A buyer types any US residential address. BLUEPRINT's 7-agent Google ADK pipelin
 |---|---|---|
 | 1 | **GeocoderAgent** | Normalises the address, geocodes to lat/lng, identifies county and state, creates the Elasticsearch case file |
 | 2 | **DeedAgent** | Fetches deed and sale history from public county APIs. Flags price drops >30%, rapid flips, and quitclaim deeds |
-| 3 | **PermitAgent** | Queries city building permit databases across 65+ US cities. Flags every open/unresolved permit — buyers inherit the liability |
+| 3 | **PermitAgent** | Queries city building permit databases via Socrata open-data portals. Flags every open/unresolved permit — buyers inherit the liability |
 | 4 | **ClimateAgent** | Checks FEMA National Flood Hazard Layer (flood zones AE/X) and USGS Earthquake Catalog within 75 km |
 | 5 | **NeighborhoodAgent** | Queries EPA EJSCREEN (PM2.5, Superfund proximity, traffic pollution) and OSM Overpass (schools, parks, transit within 500m) |
 | 6 | **SynthesisAgent** | Hybrid ELSER semantic + BM25 search over all Elasticsearch events + five ES|QL queries → Gemini 3 generates the Buyer Risk Score, property timeline, diligence questions, and Escape Plan |
@@ -58,14 +70,14 @@ A buyer types any US residential address. BLUEPRINT's 7-agent Google ADK pipelin
 
 | Layer | Technology |
 |---|---|
-| **Agent framework** | [Google Cloud ADK 2.0](https://github.com/google/adk-python) — `SequentialAgent` + `LlmAgent` + `FunctionTool` + `Runner` |
+| **Agent framework** | [Google Agent Development Kit (ADK) 2.0](https://github.com/google/adk-python) — the open-source framework that powers **Vertex AI Agent Builder / Agent Engine**. Uses `SequentialAgent` + `LlmAgent` + `FunctionTool` + `Runner` |
 | **Primary model** | Gemini 3 Flash Preview (`gemini-3-flash-preview`) via AI Studio API |
 | **Fallback model** | Gemini 2.5 Flash via Vertex AI — automatic if primary is unavailable |
 | **Search & memory** | [Elastic Cloud Serverless](https://cloud.elastic.co) — ELSER hybrid retrieval, Agent Builder MCP, ES|QL, `text_similarity_reranker` |
 | **Backend** | FastAPI + Uvicorn — async Python, SSE streaming, 18 REST endpoints |
 | **Frontend** | Vanilla JS + Leaflet.js — single-page app, all data from `/api/*` endpoints |
 | **Geocoding** | OpenStreetMap Nominatim — no API key required |
-| **Permit data** | 65+ US cities via Socrata open data portals |
+| **Permit data** | 36 cities with schema-mapped Socrata permit feeds, 65 portals wired total (graceful fallback) |
 | **Climate data** | FEMA NFHL, USGS Earthquake Catalog, EPA EJSCREEN — all 50 states |
 | **Neighbourhood** | OSM Overpass API — schools, parks, transit, amenities within 500m |
 | **Alerts** | Slack Incoming Webhooks |
@@ -75,34 +87,56 @@ A buyer types any US residential address. BLUEPRINT's 7-agent Google ADK pipelin
 
 ## Elasticsearch integration
 
-BLUEPRINT uses five Elasticsearch indices as a persistent intelligence layer:
+BLUEPRINT uses six Elasticsearch indices as a persistent intelligence layer:
 
 | Index | Purpose |
 |---|---|
-| `blueprint_cases` | Geocoded property case files — one document per address analysed |
+| `blueprint_cases` | Geocoded property case files — one document per address analysed (`geo_point` location) |
 | `blueprint_events` | Property events — permits, deeds, climate, neighbourhood findings (`semantic_text` field for ELSER) |
-| `blueprint_reports` | Synthesised reports — risk scores, escape plans, debate verdicts (permanently searchable) |
+| `blueprint_reports` | Synthesised reports — risk scores, escape plans, debate verdicts (`geo_point`, permanently searchable) |
 | `blueprint_shared` | Share links — public report access with expiry timestamps |
 | `blueprint_watched` | Watchlist — monitored properties re-analysed every 24 hours |
+| `blueprint_alerts` | Percolator — saved risk-profile queries for proactive reverse-search alerting |
 
-**Retrieval capabilities used:**
+BLUEPRINT deliberately exercises the **full Elastic Search-AI surface** — every capability
+degrades gracefully to the next-best path, and the live state of each is exposed at
+`/api/elastic/status` (rendered in the in-app **⚡ Elastic Intelligence** dashboard, nothing hardcoded).
 
-- **ELSER hybrid search** — `semantic_text` + BM25 over heterogeneous property records via Agent Builder MCP
-- **`text_similarity_reranker`** — `.rerank-v1-elasticsearch` inference endpoint to rerank BM25 results by semantic relevance; graceful BM25 fallback if the endpoint is unavailable
-- **Agent Builder MCP** — Streamable HTTP at `{KIBANA_URL}/api/agent_builder/mcp`; `platform.core.esql` tool used for ES|QL execution
-- **ES|QL queries** — five cross-reference queries per analysis:
+**Retrieval**
+
+- **ELSER semantic search** — `semantic_text` over heterogeneous property records via `.elser-2-elasticsearch`
+- **RRF hybrid retriever** — Reciprocal Rank Fusion blends BM25 lexical + ELSER semantic rankings
+- **`text_similarity_reranker`** — `.rerank-v1-elasticsearch` reorders results by risk relevance; graceful BM25 fallback
+- Every analysis records which strategy actually ran (shown in the report's "How Elastic powered this analysis" panel)
+
+**Analytics**
+
+- **ES|QL** — five cross-reference queries per analysis:
   1. Event type distribution with value aggregates
   2. Permit-sale timing cross-reference (undisclosed construction detection)
   3. High-confidence events filter (confidence ≥ 0.9)
   4. Semantic RERANK — top 5 risk events via `.rerank-v1-elasticsearch`
-  5. Flip fraud detection — rapid deed transfer pattern (≥2 sales, flagged at ≥3)
-- **Memory layer write-back** — every agent writes findings to Elasticsearch before the next agent reads them; synthesised reports accumulate permanently and power cross-property intelligence
+  5. Flip-fraud detection — rapid deed transfer pattern (≥2 sales, flagged at ≥3)
+- **Geo-distance** — `geo_point` + `geo_distance` surface previously-analysed properties within 50 km, nearest first
+- **Aggregations** — `terms` · `stats` · `percentiles` · `date_histogram` · `cardinality` power live market intelligence (`/api/elastic/insights`)
+- **`significant_terms`** — risk flags statistically over-represented in each risk band
+
+**Agentic & proactive**
+
+- **Agent Builder MCP** — Streamable HTTP at `{KIBANA_URL}/api/agent_builder/mcp`; `platform.core.search` + `platform.core.esql`
+- **Custom Agent Builder tools** — BLUEPRINT provisions ES|QL tools (`blueprint_flip_fraud`, `blueprint_permit_sale_timing`, `blueprint_top_risk_events`) into Agent Builder via the Kibana API, then **wires them into the ADK SynthesisAgent via `MCPToolset`** — so Gemini *autonomously chooses* to call them by name over MCP, not hard-coded Python
+- **Percolator** — saved risk-profile queries; every finished report is reverse-searched to fire proactive risk alerts
+- **Memory-layer write-back** — every agent writes findings to Elasticsearch before the next reads them; synthesised reports accumulate permanently and power the geo + aggregation cross-property intelligence
 
 ---
 
 ## Permit coverage
 
-Building permit data is pulled from Socrata open data portals across 65+ US cities:
+Building-permit data is pulled from Socrata open-data portals. **36 cities** have fully
+schema-mapped permit feeds (real Socrata dataset IDs); the remainder are wired to their
+city portals and fall back gracefully when a feed is unavailable. The live, authoritative
+count is exposed at `/api/coverage` (`verified_permit_cities` vs `total_permit_cities`) —
+the UI reads it from there, nothing is hardcoded. Schema-mapped + wired cities:
 
 **Northeast:** New York City, Philadelphia, Baltimore, Washington DC, Boston, Newark, Hartford, Providence, Pittsburgh  
 **Southeast:** Atlanta, Miami, Tampa, Orlando, Jacksonville, Charlotte, Raleigh, Richmond, Virginia Beach, New Orleans, Memphis, Nashville  
@@ -260,7 +294,7 @@ Interactive API docs at `/docs` (Swagger) and `/redoc`.
 | OpenStreetMap Nominatim | Address geocoding | Worldwide |
 | OSM Overpass API | Schools, parks, transit, amenities | Worldwide |
 | NYC Open Data — DOB Permits & Sales | Building permits + rolling property sales | New York City (5 boroughs) |
-| 65+ Socrata city portals | Building permits | 65+ US cities |
+| Socrata city portals | Building permits | 36 schema-mapped cities, 65 wired |
 | FEMA National Flood Hazard Layer | Flood zone classification (AE, X, VE, AO, etc.) | All 50 states + territories |
 | USGS Earthquake Catalog | Seismic events within 75 km (M2.5+) | Worldwide |
 | EPA EJSCREEN | PM2.5, Superfund proximity, traffic pollution, diesel PM | All 50 states (block-group level) |

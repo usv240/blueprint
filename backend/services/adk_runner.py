@@ -1,5 +1,5 @@
 """
-BLUEPRINT ADK pipeline — 7-agent SequentialAgent that analyses a property address.
+BLUEPRINT ADK pipeline: 7-agent SequentialAgent that analyses a property address.
 
 Pipeline:
   GeocoderAgent    → normalise address + geocode to lat/lng + initialise Elastic case file
@@ -32,6 +32,7 @@ from google.adk.agents import LlmAgent, SequentialAgent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools import FunctionTool
+from google.adk.tools.mcp_tool import MCPToolset, StreamableHTTPConnectionParams
 from google.genai import types as genai_types
 
 from backend.config import settings
@@ -88,11 +89,12 @@ async def tool_geocode_address(address: str) -> dict:
         geo = await geocode(address)
         state.update(geo)
         _step("GeocoderAgent", f"Located in {geo['county']}, {geo['state']}", f"Coordinates: {geo['lat']:.4f}, {geo['lng']:.4f}")
-        _step("GeocoderAgent", f"Data tier: {geo['data_tier'].upper()} — initialising Elastic case file")
+        _step("GeocoderAgent", f"Data tier: {geo['data_tier'].upper()}, initialising Elastic case file")
 
         # Write case file to Elastic (memory layer)
         case_doc = {
             **geo,
+            "location": {"lat": geo["lat"], "lon": geo["lng"]},  # geo_point for geo_distance
             "created_at": datetime.now(timezone.utc).isoformat(),
             "status": "analyzing",
         }
@@ -146,7 +148,7 @@ async def tool_fetch_permit_records(address: str = "", county: str = "", state_n
         _finding("PermitAgent", len(events),
                  f"{len(events)} permits found · {open_count} still open · {indexed} written to Elastic")
         if open_count > 0:
-            _step("PermitAgent", f"⚠ {open_count} open/unresolved permit(s) flagged", "Verify status before closing")
+            _step("PermitAgent", f"[WARN] {open_count} open/unresolved permit(s) flagged", "Verify status before closing")
     else:
         _finding("PermitAgent", 0, "No permit records found for this address")
 
@@ -197,7 +199,7 @@ async def tool_fetch_neighborhood(address: str = "", lat: float = 0.0, lng: floa
         return {"skipped": True, "reason": "geocoding failed"}
 
     _step("NeighborhoodAgent", f"Scanning neighbourhood environment for {state.get('normalized_address', 'property')}")
-    _step("NeighborhoodAgent", "Querying EPA EJSCREEN — air quality, Superfund sites, toxic facilities")
+    _step("NeighborhoodAgent", "Querying EPA EJSCREEN, air quality, Superfund sites, toxic facilities")
 
     geo = {k: state.get(k) for k in ["address_hash", "normalized_address", "lat", "lng", "county", "state"]}
     data = await fetch_neighborhood_data(geo)
@@ -216,7 +218,7 @@ async def tool_fetch_neighborhood(address: str = "", lat: float = 0.0, lng: floa
 
     _step("NeighborhoodAgent",
           f"EPA: PM2.5 {pm25:.1f} µg/m³ · Superfund proximity {superfund:.0f}/100",
-          "superfund_site_nearby" in env_flags and "⚠ Superfund site detected within 0.5 miles" or "")
+          "superfund_site_nearby" in env_flags and "[WARN] Superfund site detected within 0.5 miles" or "")
     _step("NeighborhoodAgent",
           f"OSM: {schools} school(s), {parks} park(s), {transit} transit stop(s) nearby")
     _finding("NeighborhoodAgent", len(neighborhood_events),
@@ -237,7 +239,7 @@ async def tool_debate_analysis(address: str = "", **_: str) -> dict:
     if not report:
         return {"skipped": True, "reason": "no report to debate"}
 
-    _step("DebateAgent", "Initiating two-sided risk debate — OptimistAgent vs PessimistAgent")
+    _step("DebateAgent", "Initiating two-sided risk debate, OptimistAgent vs PessimistAgent")
 
     score        = report.get("buyer_risk_score", 50)
     summary      = report.get("summary", "")
@@ -257,7 +259,7 @@ Schools Nearby: {neighborhood.get('schools_nearby', 'N/A')}
 Diligence Questions: {report.get('diligence_questions', [])}"""
 
     _step("DebateAgent", "OptimistAgent: building the case that risk is overstated")
-    optimist_prompt = f"""You are OptimistAgent — a real estate optimist attorney reviewing this property report.
+    optimist_prompt = f"""You are OptimistAgent, a real estate optimist attorney reviewing this property report.
 Your job: argue that the risk score of {score}/100 is TOO HIGH. Find every positive signal, explain why each flag may be manageable, and present the best-case scenario for a buyer.
 
 {context}
@@ -266,7 +268,7 @@ Respond with JSON:
 {{"argument": "<2-3 sentence optimistic case>", "adjusted_score": <integer, lower than {score}>, "key_positives": ["<3 specific points in favour of buying>"]}}"""
 
     _step("DebateAgent", "PessimistAgent: building the worst-case scenario")
-    pessimist_prompt = f"""You are PessimistAgent — a risk-averse real estate attorney reviewing this property report.
+    pessimist_prompt = f"""You are PessimistAgent, a risk-averse real estate attorney reviewing this property report.
 Your job: argue that the risk score of {score}/100 is TOO LOW. Identify every worst-case scenario, hidden liability, and what could go catastrophically wrong after purchase.
 
 {context}
@@ -286,7 +288,7 @@ Respond with JSON:
           f"OptimistAgent scores it {opt_score} · PessimistAgent scores it {pes_score}",
           "VerdictAgent adjudicating…")
 
-    verdict_prompt = f"""You are VerdictAgent — an impartial senior real estate analyst.
+    verdict_prompt = f"""You are VerdictAgent, an impartial senior real estate analyst.
 Two analysts have debated this property. Weigh their arguments and deliver a final verdict.
 
 ORIGINAL SCORE: {score}/100
@@ -307,7 +309,7 @@ Deliver a final verdict. Respond with JSON:
           f"Verdict: {buy_rec} · Final score {final_score}/100 · Confidence {confidence}",
           verdict_text[:120])
     _finding("DebateAgent", 3,
-             f"Debate complete — {buy_rec} recommendation · Confidence: {confidence} · Final score: {final_score}/100")
+             f"Debate complete, {buy_rec} recommendation · Confidence: {confidence} · Final score: {final_score}/100")
 
     debate_result = {
         "optimist": optimist_result,
@@ -324,7 +326,38 @@ Deliver a final verdict. Respond with JSON:
     report["buyer_risk_score"] = final_score
     report["buy_recommendation"] = buy_rec
     report["confidence"] = confidence
-    await elastic.index_document(IDX_REPORTS, report["address_hash"], report)
+    report["risk_level"] = _risk_band(final_score)  # keep band consistent with debated score
+    address_hash = report.get("address_hash", "")
+
+    # ── Proactive Elastic layer (on the debate-adjusted final score) ──────────
+    # Percolator reverse-search: which saved risk profiles does this property match?
+    matched_alerts = await elastic.percolate_property(report)
+    report.setdefault("elastic_provenance", {})["percolator_matches"] = matched_alerts
+    debate_result["percolator_matches"] = matched_alerts  # surfaced live via debate_complete
+    await elastic.index_document(IDX_REPORTS, address_hash, report)
+    if matched_alerts:
+        names = ", ".join(a.get("alert_name", "") for a in matched_alerts)
+        _step("DebateAgent", f"Percolator: {len(matched_alerts)} saved risk profile(s) matched", names)
+
+    # Auto-watch high-risk properties in the Elastic memory layer
+    if final_score >= 75 and address_hash:
+        from backend.routes.watch import IDX_WATCHED
+        await elastic.index_document(IDX_WATCHED, address_hash, {
+            "address_hash": address_hash,
+            "normalized_address": report.get("normalized_address", ""),
+            "watched_at": datetime.now(timezone.utc).isoformat(),
+            "last_checked": datetime.now(timezone.utc).isoformat(),
+            "auto_watched": True,
+            "trigger_score": final_score,
+        })
+        _step("DebateAgent",
+              f"Auto-added to Elastic watchlist, final score {final_score} ≥ 75 → 24h monitoring")
+
+    # Fire Slack alert on the debated final score
+    if settings.SLACK_WEBHOOK_URL and final_score >= settings.SLACK_ALERT_THRESHOLD:
+        await post_alert(report)
+        _step("DebateAgent",
+              f"Slack alert sent, final score {final_score} ≥ threshold {settings.SLACK_ALERT_THRESHOLD}")
 
     _emit({"type": "debate_complete", "debate": debate_result})
     state["debate"] = debate_result
@@ -341,12 +374,37 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
     address_hash = state.get("address_hash", "")
     normalized_address = state.get("normalized_address", "unknown address")
 
-    _step("SynthesisAgent", "Querying Elastic — hybrid search over all property events")
+    _step("SynthesisAgent", "Querying Elastic, hybrid search over all property events")
 
-    # Hybrid ELSER search via Elastic MCP (or direct SDK fallback)
+    # Hybrid retrieval, RRF (BM25 ⊕ ELSER) / MCP / reranker, strongest available.
+    # The provenance dict records exactly which Elastic capabilities ran, for the UI.
     query_text = f"property risk permits deed flood {normalized_address}"
-    all_events = await elastic.search_events(address_hash, query=query_text)
-    _step("SynthesisAgent", f"Retrieved {len(all_events)} events from Elastic ELSER hybrid search")
+    retrieval = await elastic.hybrid_search_events(address_hash, query=query_text)
+    all_events = retrieval.get("events", [])
+    retrieval_strategy = retrieval.get("strategy", "bm25")
+    provenance: dict = {
+        "retrieval_strategy": retrieval_strategy,
+        "events_retrieved": len(all_events),
+        "reranked": retrieval.get("reranked", False),
+        "esql_queries": [],          # filled below as each query runs
+        "mcp_active": elastic.mcp_available,
+    }
+    _STRATEGY_LABEL = {
+        "elastic_mcp_hybrid": "Elastic Agent Builder MCP hybrid search",
+        "rrf_bm25_elser":     "RRF hybrid retriever (BM25 ⊕ ELSER)",
+        "semantic_reranker":  "ELSER + semantic reranker",
+        "bm25":               "BM25 keyword",
+        "unavailable":        "Elastic unavailable",
+    }
+    _step("SynthesisAgent",
+          f"Retrieved {len(all_events)} events via {_STRATEGY_LABEL.get(retrieval_strategy, retrieval_strategy)}")
+
+    def _record_esql(name: str, query: str, rows: list) -> None:
+        provenance["esql_queries"].append({
+            "name": name,
+            "query": " ".join(query.split()),
+            "row_count": len(rows) if isinstance(rows, list) else 0,
+        })
 
     # ── ES|QL Query 1: Event type distribution with value aggregates ───────────
     esql_distribution = (
@@ -357,6 +415,7 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
         f'| SORT count DESC'
     )
     type_distribution = await elastic.esql(esql_distribution)
+    _record_esql("Event type distribution", esql_distribution, type_distribution)
     _step("SynthesisAgent", f"ES|QL distribution: {len(type_distribution)} event categories found")
 
     # ── ES|QL Query 2: Permit-sale timing cross-reference ─────────────────────
@@ -370,8 +429,9 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
         f'| SORT event_type ASC'
     )
     timing_rows = await elastic.esql(esql_timing)
+    _record_esql("Permit–sale timing cross-reference", esql_timing, timing_rows)
 
-    # Parse timing — flag permits that predate or overlap with sales
+    # Parse timing, flag permits that predate or overlap with sales
     permit_timing = next((r for r in timing_rows if r.get("event_type") == "permit"), {})
     sale_timing   = next((r for r in timing_rows if r.get("event_type") == "sale"), {})
     timing_insight = ""
@@ -385,14 +445,14 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
                 timing_insight = (
                     f"ES|QL PERMIT-SALE CROSS-REFERENCE: {p_n} permit(s) first recorded "
                     f"{p_earliest}; {s_n} sale(s) with latest on {s_latest}. "
-                    f"Permits predate or overlap latest sale — verify all permits were "
+                    f"Permits predate or overlap latest sale, verify all permits were "
                     f"closed before deed transfer (a common undisclosed-construction red flag)."
                 )
             else:
                 timing_insight = (
                     f"ES|QL PERMIT-SALE CROSS-REFERENCE: {p_n} permit(s) first recorded "
                     f"{p_earliest} (after latest sale {s_latest}). "
-                    f"Post-sale construction activity detected — may indicate renovation "
+                    f"Post-sale construction activity detected, may indicate renovation "
                     f"or unpermitted additions by current owner."
                 )
     if timing_insight:
@@ -406,8 +466,9 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
         f'| SORT verified_events DESC'
     )
     high_confidence = await elastic.esql(esql_high_risk)
+    _record_esql("High-confidence events (≥0.9)", esql_high_risk, high_confidence)
 
-    # ── ES|QL Query 4: Semantic RERANK — top risk events via Elastic built-in reranker ──
+    # ── ES|QL Query 4: Semantic RERANK, top risk events via Elastic built-in reranker ──
     # RERANK reorders events by semantic similarity to the risk query, surfacing
     # the most contextually relevant findings for Gemini synthesis.
     top_risk_events: list[dict] = []
@@ -421,19 +482,20 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
     )
     try:
         top_risk_events = await elastic.esql(esql_rerank)
+        _record_esql("Semantic RERANK top-risk events", esql_rerank, top_risk_events)
         if top_risk_events:
             _step("SynthesisAgent",
                   f"ES|QL RERANK: {len(top_risk_events)} highest-risk events surfaced via semantic reranking")
     except Exception:
-        pass  # RERANK requires Elastic 9.3+ / Serverless — graceful fallback
+        pass  # RERANK requires Elastic 9.3+ / Serverless, graceful fallback
 
     _step("SynthesisAgent",
-          f"ES|QL cross-reference complete — {len(type_distribution)} categories · "
+          f"ES|QL cross-reference complete, {len(type_distribution)} categories · "
           f"timing analysis · {len(high_confidence)} high-confidence types · "
           f"{len(top_risk_events)} semantically reranked top-risk events")
 
     # ── ES|QL Query 5: Flip fraud pattern detection ───────────────────────────
-    # Detects rapid repeated sales — a hallmark of renovation fraud, distress
+    # Detects rapid repeated sales, a hallmark of renovation fraud, distress
     # flips, and title fraud schemes. Unique intelligence Elastic enables.
     esql_flips = (
         f'FROM {IDX_EVENTS} '
@@ -445,6 +507,7 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
     flip_flag = ""
     try:
         flip_rows = await elastic.esql(esql_flips)
+        _record_esql("Flip-fraud detection", esql_flips, flip_rows)
         if flip_rows:
             row = flip_rows[0]
             sale_count = row.get("sale_count", 0)
@@ -452,13 +515,13 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
             last_sale  = str(row.get("last_sale", ""))[:10]
             if sale_count >= 3:
                 flip_flag = (
-                    f"{sale_count} deed transfers recorded between {first_sale} and {last_sale} "
-                    f"— rapid flip pattern, possible distress sale or renovation fraud"
+                    f"{sale_count} deed transfers recorded between {first_sale} and {last_sale}: "
+                    f"rapid flip pattern, possible distress sale or renovation fraud"
                 )
                 _step("SynthesisAgent",
-                      f"ES|QL FLIP DETECTION: {sale_count} sales in records — pattern flagged")
+                      f"ES|QL FLIP DETECTION: {sale_count} sales in records, pattern flagged")
             elif sale_count == 2:
-                flip_flag = f"2 deed transfers between {first_sale} and {last_sale} — verify legitimacy"
+                flip_flag = f"2 deed transfers between {first_sale} and {last_sale}, verify legitimacy"
     except Exception:
         pass
 
@@ -500,18 +563,35 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
         top_risk_events=top_risk_events,
     )
 
+    # ── Finalise Elastic provenance: geo cross-reference + significant terms ──
+    risk_level     = report.get("risk_level", "UNKNOWN")
+    flood_zone_top = (state.get("climate_risk", {}) or {}).get("flood_zone", "") or ""
+    lat, lng = state.get("lat"), state.get("lng")
+    nearby   = await elastic.geo_search_nearby(lat, lng, radius_km=50, exclude_hash=address_hash, size=6)
+    sig_flags = await elastic.significant_flags(risk_level)
+    provenance["geo_nearby_count"]        = len(nearby)
+    provenance["geo_nearby"]              = nearby
+    provenance["significant_terms_count"] = len(sig_flags)
+    provenance["significant_terms"]       = sig_flags
+    provenance["indices_written"]         = [IDX_CASES, IDX_EVENTS, IDX_REPORTS]
+    if nearby:
+        _step("SynthesisAgent",
+              f"geo_distance: {len(nearby)} previously-analysed propert(y/ies) within 50 km cross-referenced")
+
     # Write final report to Elastic
     # NOTE: geo + neighborhood + climate fields are included so the SSE "complete"
-    # event has everything the frontend needs in one payload — no second API call.
+    # event has everything the frontend needs in one payload, no second API call.
     report_doc = {
         "case_id": address_hash,
         "address_hash": address_hash,
         "normalized_address": normalized_address,
         "display_address": state.get("display_address", normalized_address),
-        "lat": state.get("lat"),
-        "lng": state.get("lng"),
+        "lat": lat,
+        "lng": lng,
+        "location": ({"lat": lat, "lon": lng} if lat is not None and lng is not None else None),
         "county": state.get("county", ""),
         "state": state.get("state", ""),
+        "flood_zone": flood_zone_top,
         "data_tier": state.get("data_tier", "generic"),
         "buyer_risk_score": report.get("buyer_risk_score", 50),
         "risk_level": report.get("risk_level", "UNKNOWN"),
@@ -530,36 +610,30 @@ async def tool_synthesize_report(address: str = "", **_: str) -> dict:
             "high_confidence_events": len(high_confidence),
             "top_risk_events": top_risk_events,
         },
+        "elastic_provenance": provenance,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await elastic.index_document(IDX_REPORTS, address_hash, report_doc)
     _step("SynthesisAgent", "Final report written to Elasticsearch")
 
-    # Auto-watch high-risk properties in the Elastic watchlist (memory layer)
-    score = report_doc.get("buyer_risk_score", 0)
-    if score >= 75:
-        from backend.routes.watch import IDX_WATCHED
-        await elastic.index_document(IDX_WATCHED, address_hash, {
-            "address_hash": address_hash,
-            "normalized_address": normalized_address,
-            "watched_at": datetime.now(timezone.utc).isoformat(),
-            "last_checked": datetime.now(timezone.utc).isoformat(),
-            "auto_watched": True,
-            "trigger_score": score,
-        })
-        _step("SynthesisAgent",
-              f"Property auto-added to Elastic watchlist — risk score {score} ≥ 75 triggers 24h monitoring")
-
-    # Fire Slack alert if score exceeds configured threshold
-    if settings.SLACK_WEBHOOK_URL and score >= settings.SLACK_ALERT_THRESHOLD:
-        await post_alert(report_doc)
-        _step("SynthesisAgent",
-              f"Slack alert sent — risk score {score} >= threshold {settings.SLACK_ALERT_THRESHOLD}")
+    # NOTE: auto-watch + Slack alerting are deferred to DebateAgent so they fire on
+    # the debate-adjusted final score (not the pre-debate synthesis score).
 
     _emit({"type": "complete", "report": report_doc})
 
     state["final_report"] = report_doc
     return report_doc
+
+
+def _risk_band(score: int) -> str:
+    """Map a 0-100 score to the user-facing band (matches /api/about score_bands)."""
+    if score <= 30:
+        return "LOW"
+    if score <= 60:
+        return "MEDIUM"
+    if score <= 80:
+        return "HIGH"
+    return "CRITICAL"
 
 
 def _build_timeline(events: list[dict]) -> list[dict]:
@@ -614,7 +688,7 @@ async def _gemini_synthesize(
 
 {normalized_address} ({county}, {state_name})
 
-EVENTS FROM PUBLIC RECORDS — retrieved via Elastic ELSER hybrid search (most recent first):
+EVENTS FROM PUBLIC RECORDS, retrieved via Elastic ELSER hybrid search (most recent first):
 {events_summary}
 
 RISK FLAGS:
@@ -630,7 +704,7 @@ Your task: produce a JSON report with this exact schema:
   "summary": <2-3 sentence plain-English summary of the key findings>,
   "diligence_questions": [<3 specific questions this buyer should ask before closing>],
   "data_sources": [<list of source names used>],
-  "positive_signals": [<any positive findings — e.g. long ownership history, renovated permits resolved>],
+  "positive_signals": [<any positive findings, e.g. long ownership history, renovated permits resolved>],
   "escape_plan": [<list of 3-5 specific, actionable steps ranked by risk-reduction impact, each as a string like "Resolve 30 open permits → estimated -25 risk points (HIGH → MEDIUM)">]
 }}
 
@@ -719,7 +793,7 @@ Your job is to assess the surrounding environment using EPA and OpenStreetMap da
 Call tool_fetch_neighborhood. Report the neighbourhood score, any environmental hazards found, and the quality of nearby amenities.
 """
 
-_DEBATE_INSTRUCTION = """You are the DebateAgent for BLUEPRINT — the final quality-control agent.
+_DEBATE_INSTRUCTION = """You are the DebateAgent for BLUEPRINT, the final quality-control agent.
 
 Previous agents have completed a full property analysis:
 - Geocoding: {geocoder_result}
@@ -737,7 +811,7 @@ Your job is to run a rigorous two-sided debate on the risk assessment:
 Call tool_debate_analysis. This produces the most trustworthy, defensible final output.
 """
 
-_SYNTHESIS_INSTRUCTION = """You are the SynthesisAgent for BLUEPRINT.
+_SYNTHESIS_INSTRUCTION_MCP = """You are the SynthesisAgent for BLUEPRINT.
 
 Previous agents have completed:
 - Geocoding: {geocoder_result}
@@ -746,15 +820,100 @@ Previous agents have completed:
 - Climate risk: {climate_result}
 - Neighbourhood intelligence: {neighborhood_result}
 
-Your job is to query the Elastic memory layer for all findings, perform an ES|QL cross-reference analysis, and generate the final Buyer Risk Score, property intelligence report, and Escape Plan.
+You have access to two categories of tools:
 
-Call tool_synthesize_report. This produces the full report including risk score, timeline, diligence questions, and the escape plan showing exactly what steps reduce the risk score.
+1. ELASTIC AGENT BUILDER TOOLS via MCP (call these first):
+   - platform.core.search         , hybrid ELSER semantic + BM25 search over property events
+   - platform.core.execute_esql   , execute ES|QL queries against Elasticsearch
+   - platform.core.generate_esql  , generate ES|QL from natural language, then execute
+   - blueprint_flip_fraud         , detect rapid deed transfers (flip-fraud pattern)
+   - blueprint_permit_sale_timing , cross-reference permit vs. sale timing
+   - blueprint_top_risk_events    , semantically reranked top risk events
+
+   Use platform.core.search to retrieve property events for this address_hash.
+   Use platform.core.execute_esql for cross-references.
+   Call blueprint_* tools with the address_hash from the geocoding result.
+
+2. PIPELINE SYNTHESIS TOOL:
+   - tool_synthesize_report, reads all findings from Elastic, runs ES|QL cross-reference
+     analysis, and generates the Buyer Risk Score, timeline, diligence questions, Escape Plan.
+
+Workflow: call the Elastic Agent Builder tools first, then call tool_synthesize_report.
+"""
+
+# Fallback instruction used when Elastic Agent Builder MCP is not reachable.
+# All ES|QL cross-referencing still runs inside tool_synthesize_report via the direct SDK.
+_SYNTHESIS_INSTRUCTION_NO_MCP = """You are the SynthesisAgent for BLUEPRINT.
+
+Previous agents have completed:
+- Geocoding: {geocoder_result}
+- Deed records: {deed_result}
+- Permit records: {permit_result}
+- Climate risk: {climate_result}
+- Neighbourhood intelligence: {neighborhood_result}
+
+Your job is to query the Elastic memory layer for all findings, perform ES|QL cross-reference
+analysis (RRF hybrid retrieval, permit-sale timing, flip-fraud detection, semantic RERANK),
+and generate the final Buyer Risk Score, property intelligence report, and Escape Plan.
+
+Call tool_synthesize_report. This runs the full ES|QL pipeline and produces the complete
+report including risk score, timeline, diligence questions, and the Escape Plan.
 """
 
 _MODEL = settings.GEMINI_MODEL
 
+# The three custom Agent Builder tools BLUEPRINT provisioned into Elastic Agent Builder.
+# Gemini will choose to call them by name over MCP once the toolset is in its tool list.
+_ELASTIC_MCP_TOOLS = [
+    # Agent Builder platform tools (confirmed in Kibana tool library)
+    "platform.core.search",          # hybrid ELSER + BM25 search over any index
+    "platform.core.execute_esql",    # execute ES|QL queries
+    "platform.core.generate_esql",   # natural-language → ES|QL query generation
+    # Custom BLUEPRINT tools (added manually in Kibana Agent Builder Tools)
+    "blueprint_flip_fraud",
+    "blueprint_permit_sale_timing",
+    "blueprint_top_risk_events",
+]
+
+
+def _elastic_mcp_toolset() -> MCPToolset | None:
+    """Build an MCPToolset pointing at Elastic Agent Builder.
+
+    Only attached when MCP was successfully reachable at startup.
+    Returns None otherwise so the pipeline falls back cleanly to FunctionTool-only.
+    The toolset is scoped to the three custom BLUEPRINT ES|QL tools.
+    Compatible with google-adk >= 1.3.0 (local dev) and 2.0.0 (pinned deploy).
+    """
+    if not settings.ELASTIC_MCP_URL or not settings.ELASTIC_API_KEY:
+        return None
+    # Guard: don't attach if MCP ping failed at startup, attaching an unreachable
+    # MCPToolset causes the ADK Runner to throw when it initialises the agent.
+    if not elastic.mcp_available:
+        return None
+    try:
+        return MCPToolset(
+            connection_params=StreamableHTTPConnectionParams(
+                url=settings.ELASTIC_MCP_URL,
+                headers={"Authorization": f"ApiKey {settings.ELASTIC_API_KEY}"},
+                timeout=30.0,
+                sse_read_timeout=120.0,
+            ),
+            tool_filter=_ELASTIC_MCP_TOOLS,
+        )
+    except Exception as exc:
+        logger.warning("[ADK] Could not build Elastic MCPToolset: %s, MCP tools unavailable", exc)
+        return None
+
 
 def _build_agents() -> SequentialAgent:
+    # Build the Elastic Agent Builder MCPToolset once (or None if not configured).
+    # When present, SynthesisAgent sees the custom ES|QL tools alongside its
+    # FunctionTool, and Gemini can call them by name over MCP.
+    elastic_toolset = _elastic_mcp_toolset()
+    if elastic_toolset:
+        logger.info("[ADK] Elastic Agent Builder MCPToolset attached to SynthesisAgent "
+                    "(tools: %s)", ", ".join(_ELASTIC_MCP_TOOLS))
+
     geocoder = LlmAgent(
         name="GeocoderAgent",
         model=_MODEL,
@@ -790,11 +949,22 @@ def _build_agents() -> SequentialAgent:
         tools=[FunctionTool(tool_fetch_neighborhood)],
         output_key="neighborhood_result",
     )
+    # SynthesisAgent: FunctionTool always present; Elastic MCPToolset added when
+    # Agent Builder MCP is reachable so Gemini can call the custom ES|QL tools by name.
+    # The instruction is switched accordingly, Gemini must not reference tool names
+    # that aren't registered in tools_dict or ADK will raise ValueError at runtime.
+    synthesis_tools = [FunctionTool(tool_synthesize_report)]
+    if elastic_toolset is not None:
+        synthesis_tools.append(elastic_toolset)
+        synthesis_instruction = _SYNTHESIS_INSTRUCTION_MCP
+    else:
+        synthesis_instruction = _SYNTHESIS_INSTRUCTION_NO_MCP
+
     synthesis = LlmAgent(
         name="SynthesisAgent",
         model=_MODEL,
-        instruction=_SYNTHESIS_INSTRUCTION,
-        tools=[FunctionTool(tool_synthesize_report)],
+        instruction=synthesis_instruction,
+        tools=synthesis_tools,
         output_key="synthesis_result",
     )
     debate = LlmAgent(

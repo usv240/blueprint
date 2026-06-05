@@ -3,495 +3,233 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BLUEPRINT — AI Due Diligence for Homes</title>
+  <title>BLUEPRINT · AI Due Diligence for Homes</title>
+  <meta name="description" content="Type any US address and BLUEPRINT's 7-agent AI reads the public record (deeds, permits, flood risk, environmental hazards), then debates the findings into one sourced Buyer Risk Score." />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="landing.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 </head>
-<body>
+<body class="lp">
   <!-- ── Header ─────────────────────────────────────────────────────────── -->
   <header class="site-header">
     <div class="header-inner">
-      <div class="brand">
-        <span class="brand-icon">🏠</span>
+      <a class="brand" href="/" title="BLUEPRINT">
+        <span class="brand-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></span>
         <span class="brand-name">BLUEPRINT</span>
         <span class="brand-tag">AI Due Diligence for Homes</span>
-      </div>
+      </a>
       <nav class="header-actions">
-        <button id="btn-compare-nav" class="btn-ghost" title="Compare two properties">Compare</button>
-        <button id="btn-watchlist-nav" class="btn-ghost" title="View watchlist">Watchlist</button>
-        <button id="btn-how" class="btn-ghost" title="How it works">How it works</button>
-        <button id="btn-theme" class="btn-ghost" title="Toggle theme" aria-label="Toggle theme">☀</button>
+        <a class="lp-nav-link" href="#how">How it works</a>
+        <a class="lp-nav-link" href="#features">Features</a>
+        <a class="lp-nav-link" href="/app.html">Compare</a>
+        <button id="btn-theme" class="btn-ghost" title="Toggle theme" aria-label="Toggle theme">Theme</button>
+        <a class="btn-primary" href="/app.html">Launch App →</a>
       </nav>
     </div>
   </header>
 
-  <!-- ── Live stats bar ─────────────────────────────────────────────────── -->
-  <div class="stats-bar" id="stats-bar">
-    <div class="stat-item">
-      <span class="stat-value" id="stat-total">—</span>
-      <span class="stat-label">Properties analysed</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-value" id="stat-24h">—</span>
-      <span class="stat-label">Reports today</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-value stat-badge" id="stat-elastic">Elastic SDK</span>
-      <span class="stat-label">Hybrid retrieval + memory layer</span>
-    </div>
-    <div class="stat-item">
-      <span class="stat-value stat-badge" id="stat-gemini">Loading…</span>
-      <span class="stat-label" id="stat-pipeline-label">ADK pipeline</span>
-    </div>
-  </div>
-
-  <!-- ── Hero / Search ──────────────────────────────────────────────────── -->
-  <main class="main-content">
-    <section class="hero" id="section-search">
-      <h1 class="hero-title">Every home has a story.<br>Most of it is hidden.</h1>
-      <p class="hero-subtitle">
-        Type any US address. BLUEPRINT's 7-agent AI pipeline retrieves deed records, building permits,
-        climate risk, neighbourhood hazards — then debates the findings before delivering a sourced Buyer Risk Score.
-      </p>
-
-      <form class="search-form" id="search-form" autocomplete="off">
-        <div class="search-input-wrap">
-          <span class="search-icon">🔍</span>
-          <input
-            type="text"
-            id="address-input"
-            class="search-input"
-            placeholder="Enter a US address — e.g. 123 Main St, Brooklyn, NY"
-            required
-            maxlength="300"
-            spellcheck="false"
-          />
-          <button type="submit" class="btn-primary" id="btn-analyze">Analyse Property</button>
+  <main>
+    <!-- ── Hero ─────────────────────────────────────────────────────────── -->
+    <section class="lp-hero">
+      <div class="lp-container">
+        <div class="lp-logo reveal"><span class="logo-mark"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></span> BLUEPRINT</div>
+        <h1 class="lp-title reveal">Every home has a story.<br>Most of it is hidden.</h1>
+        <div class="lp-badge reveal">
+          <span class="dot"></span> Powered by
+          <strong>Gemini 3 + Elastic Agent Builder MCP</strong>
         </div>
-        <div class="demo-presets" id="demo-presets">
-          <span class="preset-label">Try a demo:</span>
-          <button type="button" class="btn-preset" data-address="363 Van Brunt St, Brooklyn, NY" title="Flood zone AE — Hurricane Sandy damage, open permits">Red Hook, Brooklyn ⚠</button>
-          <button type="button" class="btn-preset" data-address="2121 Airline Dr, Houston, TX" title="Near refineries, Superfund sites, hurricane flood zone">Houston Refinery Zone ⚠</button>
-          <button type="button" class="btn-preset" data-address="2000 E Olympic Blvd, Los Angeles, CA" title="High traffic pollution, Superfund proximity, earthquake risk">East LA Trifecta ⚠</button>
-        </div>
-      </form>
+        <p class="lp-sub reveal">
+          The seller won't mention the flood claims, the open permits, or the Superfund site
+          down the block. BLUEPRINT's 7-agent AI reads the public record on any US address,
+          then has its agents <em>debate</em> the findings before giving you one sourced Buyer Risk Score.
+        </p>
+        <p class="lp-pitch reveal">
+          The due diligence a real-estate attorney, home inspector, and environmental report would
+          cost you <strong>thousands</strong> and take <strong>weeks</strong>.
+          BLUEPRINT does it in <strong>60 seconds</strong>.
+        </p>
 
-      <!-- Pricing CTA -->
-      <div class="pricing-cta">
-        <span class="pricing-tag">$29 / report</span>
-        <span class="pricing-sep">·</span>
-        <span class="pricing-tag">$99 / month unlimited</span>
-        <span class="pricing-sep">·</span>
-        <a href="#" class="pricing-link" onclick="return false;">Get early access →</a>
-      </div>
-
-      <!-- Validated real-world examples — populated from /api/about -->
-      <div class="validated-examples" id="validated-examples" style="display:none">
-        <div class="ve-label">Real findings — properties BLUEPRINT has analysed</div>
-        <div class="ve-cards" id="ve-cards"></div>
-      </div>
-
-      <!-- Why you need this — populated from /api/about impact_stats -->
-      <div class="edu-section why-section" id="why-section" style="display:none">
-        <h2 class="edu-section-title">What you're not told about the home you're about to buy</h2>
-        <div class="why-stats" id="why-stats"></div>
-      </div>
-
-      <!-- How it works inline — populated from /api/about how_steps -->
-      <div class="edu-section how-section" id="how-section" style="display:none">
-        <h2 class="edu-section-title">How BLUEPRINT works</h2>
-        <div class="how-steps" id="how-steps-inline"></div>
-        <div class="debate-callout" id="debate-callout">
-          <div class="debate-callout-icon">⚖</div>
-          <div class="debate-callout-body">
-            <strong>The adversarial debate — why it matters</strong>
-            <span id="debate-callout-text"></span>
+        <form class="lp-search reveal" id="hero-search">
+          <div class="lp-search-wrap">
+            <span class="lp-search-icon"></span>
+            <input type="text" id="hero-address" class="lp-search-input"
+                   placeholder="Enter a US address, e.g. 363 Van Brunt St, Brooklyn, NY"
+                   maxlength="300" spellcheck="false" autocomplete="off" />
+            <button type="submit" class="btn-primary">Analyse Property</button>
           </div>
-          <button class="btn-ghost" id="btn-hiw-inline">Full technical walkthrough →</button>
+        </form>
+
+        <div class="lp-demos reveal">
+          <span class="lp-demo-label">Try a demo:</span>
+          <button class="btn-preset" data-address="363 Van Brunt St, Brooklyn, NY">Red Hook, Brooklyn</button>
+          <button class="btn-preset" data-address="2121 Airline Dr, Houston, TX">Houston Refinery Zone</button>
+          <button class="btn-preset" data-address="2000 E Olympic Blvd, Los Angeles, CA">East LA Trifecta</button>
         </div>
-      </div>
 
-      <!-- What Blueprint checks — populated from /api/about risk_factors -->
-      <div class="edu-section checks-section" id="checks-section" style="display:none">
-        <h2 class="edu-section-title">What BLUEPRINT analyses in 60 seconds</h2>
-        <p class="edu-section-sub">Every factor below is checked on every property using official government data sources.</p>
-        <div class="checks-grid" id="checks-grid"></div>
-      </div>
-
-      <!-- Trust strip — populated from /api/about data_sources -->
-      <div class="edu-section trust-section" id="trust-section" style="display:none">
-        <p class="trust-strip-label">Official data sources used in every analysis</p>
-        <div class="trust-strip" id="trust-strip-inline"></div>
+        <p class="lp-trustline reveal">
+          Every fact traced to <strong>FEMA · USGS · EPA · county records</strong>. Nothing invented.
+        </p>
+        <p class="lp-livestat reveal" id="lp-livestat" style="visibility:hidden">
+          <b id="lp-stat-total">0</b> <span id="lp-stat-noun">properties</span> analysed · <b id="lp-stat-24h">0</b> today
+        </p>
       </div>
     </section>
 
-    <!-- ── Agent progress panel ───────────────────────────────────────────── -->
-    <section class="agent-panel" id="agent-panel" style="display:none">
-      <div class="panel-header">
-        <h2 class="panel-title">&#x1F916; Running <span id="panel-agent-count">7</span>-agent pipeline</h2>
-        <span class="panel-address" id="panel-address"></span>
+    <!-- ── Stakes ───────────────────────────────────────────────────────── -->
+    <section class="lp-section" id="why">
+      <div class="lp-container lp-center">
+        <div class="lp-eyebrow reveal">What you're not told</div>
+        <h2 class="lp-h2 reveal">The biggest purchase of your life, bought half-blind</h2>
+        <p class="lp-lead reveal">A 30-minute inspection and a seller's disclosure don't surface what the public record already knows.</p>
+        <div class="lp-stakes-grid" id="lp-stakes"><!-- populated from /api/about --></div>
       </div>
-      <div class="agents-grid" id="agents-grid">
-        <div class="agent-card" id="agent-GeocoderAgent">
-          <div class="agent-icon">📍</div>
-          <div class="agent-info">
-            <div class="agent-name">GeocoderAgent</div>
-            <div class="agent-status">Waiting…</div>
-          </div>
-          <div class="agent-badge pending">pending</div>
-        </div>
-        <div class="agent-card" id="agent-DeedAgent">
-          <div class="agent-icon">📜</div>
-          <div class="agent-info">
-            <div class="agent-name">DeedAgent</div>
-            <div class="agent-status">Waiting…</div>
-          </div>
-          <div class="agent-badge pending">pending</div>
-        </div>
-        <div class="agent-card" id="agent-PermitAgent">
-          <div class="agent-icon">🔨</div>
-          <div class="agent-info">
-            <div class="agent-name">PermitAgent</div>
-            <div class="agent-status">Waiting…</div>
-          </div>
-          <div class="agent-badge pending">pending</div>
-        </div>
-        <div class="agent-card" id="agent-ClimateAgent">
-          <div class="agent-icon">🌊</div>
-          <div class="agent-info">
-            <div class="agent-name">ClimateAgent</div>
-            <div class="agent-status">Waiting…</div>
-          </div>
-          <div class="agent-badge pending">pending</div>
-        </div>
-        <div class="agent-card" id="agent-NeighborhoodAgent">
-          <div class="agent-icon">🏘</div>
-          <div class="agent-info">
-            <div class="agent-name">NeighborhoodAgent</div>
-            <div class="agent-status">Waiting…</div>
-          </div>
-          <div class="agent-badge pending">pending</div>
-        </div>
-        <div class="agent-card" id="agent-SynthesisAgent">
-          <div class="agent-icon">⚡</div>
-          <div class="agent-info">
-            <div class="agent-name">SynthesisAgent</div>
-            <div class="agent-status">Waiting…</div>
-          </div>
-          <div class="agent-badge pending">pending</div>
-        </div>
-        <div class="agent-card" id="agent-DebateAgent">
-          <div class="agent-icon">⚖</div>
-          <div class="agent-info">
-            <div class="agent-name">DebateAgent</div>
-            <div class="agent-status">Waiting…</div>
-          </div>
-          <div class="agent-badge pending">pending</div>
-        </div>
-      </div>
-      <div class="live-log" id="live-log"></div>
     </section>
 
-    <!-- ── Report panel ────────────────────────────────────────────────────── -->
-    <section class="report-panel" id="report-panel" style="display:none">
-      <div class="report-header">
-        <div class="report-address-wrap">
-          <h2 class="report-address" id="report-address"></h2>
-          <div class="report-meta" id="report-meta"></div>
-        </div>
-        <div class="report-actions">
-          <button class="btn-action" id="btn-share-report" title="Share report link">Share</button>
-          <button class="btn-action" id="btn-watch-property" title="Watch for updates">Watch</button>
-          <button class="btn-action" id="btn-export-report" title="Download HTML buyer brief">Export</button>
-          <button class="btn-ghost" id="btn-new-search">← New search</button>
-        </div>
-      </div>
-
-      <!-- Risk score -->
-      <div class="risk-section">
-        <div class="risk-gauge-wrap">
-          <svg class="risk-gauge" viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%"   stop-color="#22c55e" />
-                <stop offset="40%"  stop-color="#eab308" />
-                <stop offset="75%"  stop-color="#f97316" />
-                <stop offset="100%" stop-color="#ef4444" />
-              </linearGradient>
-            </defs>
-            <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="16" stroke-linecap="round"/>
-            <path id="gauge-fill" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="url(#gaugeGrad)" stroke-width="16" stroke-linecap="round" stroke-dasharray="0 251"/>
-            <circle id="gauge-dot" cx="100" cy="100" r="6" fill="white"/>
-          </svg>
-          <div class="risk-score-label">
-            <span class="risk-score-value" id="risk-score-value">—</span>
-            <span class="risk-score-sub">Buyer Risk Score</span>
-          </div>
-        </div>
-        <div class="risk-details">
-          <div class="risk-level-badge" id="risk-level-badge">—</div>
-          <p class="risk-summary" id="risk-summary"></p>
-          <!-- Score band explainer — populated from /api/about -->
-          <div class="score-explainer" id="score-explainer" style="display:none">
-            <div class="score-explainer-headline" id="score-explainer-headline"></div>
-            <div class="score-explainer-meaning" id="score-explainer-meaning"></div>
-          </div>
+    <!-- ── How it works ─────────────────────────────────────────────────── -->
+    <section class="lp-section" id="how">
+      <div class="lp-container lp-center">
+        <div class="lp-eyebrow reveal">How it works</div>
+        <h2 class="lp-h2 reveal">Seven Gemini agents. One sourced verdict.</h2>
+        <p class="lp-lead reveal">A Google Cloud ADK SequentialAgent pipeline gathers the record, then an adversarial debate stress-tests the score before you ever see it.</p>
+        <div class="lp-pipe reveal">
+          <div class="lp-pipe-step"><span class="n">1</span><div class="name">Geocoder</div><div class="desc">Resolves the address to coordinates, county &amp; FEMA zone.</div></div>
+          <div class="lp-pipe-step"><span class="n">2</span><div class="name">Deed</div><div class="desc">Pulls ownership history &amp; sale records.</div></div>
+          <div class="lp-pipe-step"><span class="n">3</span><div class="name">Permit</div><div class="desc">Finds open &amp; closed building permits.</div></div>
+          <div class="lp-pipe-step"><span class="n">4</span><div class="name">Climate</div><div class="desc">FEMA flood + USGS earthquake exposure.</div></div>
+          <div class="lp-pipe-step"><span class="n">5</span><div class="name">Neighbourhood</div><div class="desc">EPA pollution, Superfund &amp; amenities.</div></div>
+          <div class="lp-pipe-step"><span class="n">6</span><div class="name">Synthesis</div><div class="desc">Elastic hybrid search + ES|QL → Buyer Risk Score.</div></div>
+          <div class="lp-pipe-step debate"><span class="n">7</span><div class="name">Debate</div><div class="desc">Optimist vs Pessimist adjust the final score.</div></div>
         </div>
       </div>
-
-      <!-- Debate verdict -->
-      <div class="debate-section" id="debate-section" style="display:none">
-        <h3 class="section-title">⚖ AI Debate Verdict</h3>
-        <div class="debate-verdict" id="debate-verdict"></div>
-        <div class="debate-cards" id="debate-cards">
-          <div class="debate-card optimist" id="debate-optimist" style="display:none">
-            <div class="debate-card-header">🟢 OptimistAgent</div>
-            <div class="debate-card-body" id="optimist-body"></div>
-            <div class="debate-card-score" id="optimist-score"></div>
-          </div>
-          <div class="debate-card pessimist" id="debate-pessimist" style="display:none">
-            <div class="debate-card-header">🔴 PessimistAgent</div>
-            <div class="debate-card-body" id="pessimist-body"></div>
-            <div class="debate-card-score" id="pessimist-score"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Flags -->
-      <div class="flags-section" id="flags-section" style="display:none">
-        <h3 class="section-title">⚠ Risk flags</h3>
-        <ul class="flags-list" id="flags-list"></ul>
-      </div>
-
-      <!-- Escape Plan -->
-      <div class="escape-section" id="escape-section" style="display:none">
-        <h3 class="section-title">🚪 Escape Plan — how to lower your risk score</h3>
-        <ol class="escape-list" id="escape-list"></ol>
-      </div>
-
-      <!-- Property Map -->
-      <div class="map-section" id="map-section" style="display:none">
-        <h3 class="section-title">📍 Property location & risk map</h3>
-        <div id="property-map" class="property-map"></div>
-        <div class="map-legend" id="map-legend"></div>
-      </div>
-
-      <!-- Neighbourhood -->
-      <div class="neighborhood-section" id="neighborhood-section" style="display:none">
-        <h3 class="section-title">🏘 Neighbourhood Intelligence</h3>
-        <div class="neighborhood-grid" id="neighborhood-grid"></div>
-      </div>
-
-      <!-- Diligence questions -->
-      <div class="questions-section" id="questions-section" style="display:none">
-        <h3 class="section-title">🔍 Key diligence questions</h3>
-        <ol class="questions-list" id="questions-list"></ol>
-      </div>
-
-      <!-- Timeline -->
-      <div class="timeline-section" id="timeline-section" style="display:none">
-        <h3 class="section-title">📅 Property timeline
-          <span class="timeline-count" id="timeline-count"></span>
-        </h3>
-        <div class="timeline-filters">
-          <button class="filter-btn active" data-filter="all">All</button>
-          <button class="filter-btn" data-filter="sale">Sales</button>
-          <button class="filter-btn" data-filter="permit">Permits</button>
-          <button class="filter-btn" data-filter="climate_flood">Climate</button>
-          <button class="filter-btn" data-filter="climate_earthquake">Earthquakes</button>
-          <button class="filter-btn" data-filter="neighborhood_env">Environment</button>
-        </div>
-        <div class="timeline" id="timeline"></div>
-      </div>
-
-      <!-- Positive signals -->
-      <div class="positive-section" id="positive-section" style="display:none">
-        <h3 class="section-title">✅ Positive signals</h3>
-        <ul class="positive-list" id="positive-list"></ul>
-      </div>
-
-      <!-- Data sources — enriched with descriptions from /api/about -->
-      <div class="sources-section" id="sources-section" style="display:none">
-        <h3 class="section-title">📚 Data sources used in this analysis</h3>
-        <div class="sources-list" id="sources-list"></div>
-        <div class="provenance-strip" id="provenance-strip"></div>
-      </div>
-
-      <!-- Similar risk properties — Elastic cross-property intelligence -->
-      <div class="similar-section" id="similar-section" style="display:none">
-        <h3 class="section-title">
-          ⚡ Similar risk profiles in BLUEPRINT's database
-          <span class="similar-badge" id="similar-badge"></span>
-        </h3>
-        <p class="similar-desc">Properties analyzed by BLUEPRINT with the same risk level — powered by Elastic's accumulated memory layer.</p>
-        <div class="similar-grid" id="similar-grid"></div>
-      </div>
-
-      <!-- Q&A panel -->
-      <div class="qa-section" id="qa-section">
-        <h3 class="section-title">💬 Ask BLUEPRINT about this property</h3>
-        <div class="qa-messages" id="qa-messages"></div>
-        <div class="qa-input-wrap">
-          <input type="text" id="qa-input" class="qa-input" placeholder="e.g. How serious are these open permits? Is this a good buy at $1.2M?" maxlength="300" />
-          <button class="btn-primary" id="btn-qa-send">Ask</button>
-        </div>
-      </div>
-
-      <!-- Integration badges — model names populated from /api/health -->
-      <div class="integration-strip" id="integration-strip">
-        <div class="int-badge elastic">
-          <span class="int-icon">&#x26A1;</span>
-          <div class="int-text">
-            <strong>Elastic Agent Builder MCP</strong>
-            <span id="int-elastic-detail">Hybrid search · ES|QL cross-reference · Memory layer write-back</span>
-          </div>
-        </div>
-        <div class="int-badge gemini">
-          <span class="int-icon">&#x1F916;</span>
-          <div class="int-text">
-            <strong id="int-gemini-name">Google ADK + Gemini</strong>
-            <span id="int-gemini-detail">Loading pipeline info…</span>
-          </div>
-        </div>
-      </div>
-
-      <p class="disclaimer">
-        All data is sourced from public records. Blueprint provides property intelligence for informational purposes only.
-        Verify all findings with licensed professionals before making purchasing decisions.
-        Every claim includes a source reference — click any timeline event to see its origin.
-      </p>
     </section>
 
-    <!-- ── Error panel ─────────────────────────────────────────────────────── -->
-    <section class="error-panel" id="error-panel" style="display:none">
-      <div class="error-content">
-        <div class="error-icon">⚠</div>
-        <h3 class="error-title">Analysis failed</h3>
-        <p class="error-message" id="error-message"></p>
-        <button class="btn-primary" id="btn-retry">Try again</button>
+    <!-- ── Debate teaser ────────────────────────────────────────────────── -->
+    <section class="lp-section">
+      <div class="lp-container">
+        <div class="lp-debate reveal">
+          <div>
+            <div class="lp-eyebrow">The differentiator</div>
+            <h2 class="lp-h2">Two AI agents argue your score before you see it</h2>
+            <p class="lp-lead">Most tools hand you one number. BLUEPRINT runs an adversarial debate: an
+              OptimistAgent and a PessimistAgent each argue the evidence, and the score settles between
+              them, confidence-adjusted and never a black box.</p>
+          </div>
+          <div class="lp-debate-visual">
+            <div class="lp-tug-heads">
+              <span>Optimist argues <strong>28</strong></span>
+              <span>Pessimist argues <strong>64</strong></span>
+            </div>
+            <div class="lp-tug-track">
+              <div class="lp-tug-tick opt" style="left:28%"></div>
+              <div class="lp-tug-tick pes" style="left:64%"></div>
+              <div class="lp-tug-final" style="left:42%">42</div>
+            </div>
+            <div class="lp-tug-cap">SynthesisAgent proposed <strong>50</strong>. After the debate, the
+              confidence-adjusted verdict settled at <strong>42/100</strong>.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── What you get ─────────────────────────────────────────────────── -->
+    <section class="lp-section" id="features">
+      <div class="lp-container lp-center">
+        <div class="lp-eyebrow reveal">What you get</div>
+        <h2 class="lp-h2 reveal">A complete buyer brief in 60 seconds</h2>
+        <div class="lp-feat-grid reveal">
+          <div class="lp-feat"><h3>Buyer Risk Score</h3><p>A single 0–100 score with a clear BUY / NEGOTIATE / AVOID verdict and confidence level.</p></div>
+          <div class="lp-feat"><h3>Escape Plan</h3><p>Concrete steps to lower your risk: repairs, concessions, and questions to raise before signing.</p></div>
+          <div class="lp-feat"><h3>Property Timeline</h3><p>Every dated record (sales, permits, floods, quakes) in one filterable history.</p></div>
+          <div class="lp-feat"><h3>Neighbourhood Intelligence</h3><p>Air quality, Superfund proximity, traffic pollution, schools, transit and parks.</p></div>
+          <div class="lp-feat"><h3>Diligence Questions</h3><p>The exact questions to ask the seller, agent, and inspector, generated for this property.</p></div>
+          <div class="lp-feat"><h3>Cross-property memory</h3><p>Elastic surfaces similar-risk properties nearby from everything BLUEPRINT has analysed.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Powered by ───────────────────────────────────────────────────── -->
+    <section class="lp-section lp-powered">
+      <div class="lp-container">
+        <div class="lp-eyebrow reveal">Built on</div>
+        <h2 class="lp-h2 reveal">Gemini reasoning · Elastic Search-AI superpowers</h2>
+        <p class="lp-lead reveal" style="margin-inline:auto">Google Cloud Agent Builder orchestrates the agents; Elastic's Agent Builder MCP gives them hybrid semantic search, ES|QL cross-referencing, and a compounding memory layer.</p>
+        <div class="lp-powered-row reveal">
+          <div class="lp-tech"><div><strong id="lp-gemini">Google ADK + Gemini 3</strong><span>7-agent SequentialAgent · adversarial debate</span></div></div>
+          <div class="lp-tech elastic"><div><strong>Elastic Agent Builder MCP</strong><span>Hybrid search · ES|QL tools · percolator alerts · memory layer</span></div></div>
+          <div class="lp-tech"><div><strong>Official public data</strong><span>FEMA · USGS · EPA · Socrata county records</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Everything included ──────────────────────────────────────────── -->
+    <section class="lp-section" id="included">
+      <div class="lp-container lp-center">
+        <div class="lp-eyebrow reveal">Everything included</div>
+        <h2 class="lp-h2 reveal">The full toolkit, nothing held back</h2>
+        <p class="lp-lead reveal">Every analysis runs the complete pipeline and every capability is open. Type an address and go.</p>
+        <div class="lp-included reveal">
+          <ul>
+            <li>Full 7-agent analysis</li>
+            <li>Buyer Risk Score + escape plan</li>
+            <li>Adversarial debate verdict</li>
+            <li>Shareable buyer brief (HTML export)</li>
+          </ul>
+          <ul>
+            <li>Side-by-side property comparison</li>
+            <li>24-hour watchlist re-analysis</li>
+            <li>Cross-property market intelligence</li>
+            <li>Every claim sourced to public records</li>
+          </ul>
+        </div>
+        <a class="btn-primary" href="/app.html" style="margin-top:0.5rem">Launch the app →</a>
+      </div>
+    </section>
+
+    <!-- ── Final CTA ────────────────────────────────────────────────────── -->
+    <section class="lp-section">
+      <div class="lp-container">
+        <div class="lp-final reveal">
+          <div class="lp-eyebrow">Don't buy blind</div>
+          <h2 class="lp-h2">What's hidden in the home you're about to buy?</h2>
+          <p class="lp-lead" style="margin-inline:auto">Type the address. Get the story in 60 seconds.</p>
+          <form class="lp-search" id="cta-search">
+            <div class="lp-search-wrap">
+              <span class="lp-search-icon"></span>
+              <input type="text" id="cta-address" class="lp-search-input"
+                     placeholder="Enter a US address…" maxlength="300" spellcheck="false" autocomplete="off" />
+              <button type="submit" class="btn-primary">Analyse Property</button>
+            </div>
+          </form>
+        </div>
       </div>
     </section>
   </main>
 
-  <!-- ── How it works modal ─────────────────────────────────────────────── -->
-  <div class="modal-overlay" id="modal-hiw" style="display:none" role="dialog" aria-modal="true">
-    <div class="modal-box modal-hiw-box">
-      <button class="modal-close" id="modal-close" aria-label="Close">&#x2715;</button>
-      <h2>How BLUEPRINT works</h2>
-
-      <!-- Tab bar — all content loaded from /api/about -->
-      <div class="hiw-tabs" id="hiw-tabs">
-        <button class="hiw-tab active" data-tab="pipeline">7-Agent Pipeline</button>
-        <button class="hiw-tab" data-tab="score">Risk Score</button>
-        <button class="hiw-tab" data-tab="sources">Data Sources</button>
-        <button class="hiw-tab" data-tab="glossary">Glossary</button>
+  <!-- ── Footer ───────────────────────────────────────────────────────── -->
+  <footer class="lp-footer">
+    <div class="lp-container">
+      <div class="lp-footer-top">
+        <a class="brand" href="/">
+          <span class="brand-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></span>
+          <span class="brand-name">BLUEPRINT</span>
+        </a>
+        <nav class="lp-footer-links">
+          <a href="/app.html">Launch app</a>
+          <a href="#how">How it works</a>
+          <a href="#features">Features</a>
+          <a href="https://github.com" target="_blank" rel="noopener">GitHub</a>
+        </nav>
       </div>
-
-      <div class="hiw-loading" id="hiw-loading">Loading…</div>
-
-      <!-- Pipeline tab -->
-      <div class="hiw-panel" id="hiw-panel-pipeline" style="display:none">
-        <p class="hiw-panel-intro" id="hiw-pipeline-intro"></p>
-        <div class="hiw-steps" id="hiw-steps-dynamic"></div>
-        <div class="hiw-footer" id="hiw-footer-dynamic"></div>
-      </div>
-
-      <!-- Risk Score tab -->
-      <div class="hiw-panel" id="hiw-panel-score" style="display:none">
-        <h3 class="hiw-section-h">Buyer Risk Score bands</h3>
-        <p class="hiw-panel-intro">The score is synthesised by SynthesisAgent, then stress-tested by OptimistAgent vs PessimistAgent. Final score is confidence-adjusted. Lower is better.</p>
-        <div class="hiw-score-bands" id="hiw-score-bands"></div>
-        <h3 class="hiw-section-h" style="margin-top:1.5rem">What contributes to your score</h3>
-        <div class="hiw-factors" id="hiw-factors"></div>
-      </div>
-
-      <!-- Data Sources tab -->
-      <div class="hiw-panel" id="hiw-panel-sources" style="display:none">
-        <h3 class="hiw-section-h">Where BLUEPRINT gets its data</h3>
-        <p class="hiw-panel-intro">Every claim cites a specific public data source. No proprietary black-box data — all sources are publicly verifiable by any buyer or their attorney.</p>
-        <div class="hiw-sources" id="hiw-sources-dynamic"></div>
-      </div>
-
-      <!-- Glossary tab -->
-      <div class="hiw-panel" id="hiw-panel-glossary" style="display:none">
-        <h3 class="hiw-section-h">Real estate + environmental glossary</h3>
-        <p class="hiw-panel-intro">Key terms that appear in BLUEPRINT reports — what they mean in plain English and why they matter for buyers.</p>
-        <div class="hiw-glossary" id="hiw-glossary-dynamic"></div>
-      </div>
+      <p class="lp-footer-legal">
+        <span class="lp-footer-badge">Powered by Google Cloud, Gemini, and Elastic.</span>
+        All data is sourced from public records and provided for informational purposes only.
+        Verify all findings with licensed professionals before making purchasing decisions.
+        © <span id="lp-year">2026</span> BLUEPRINT.
+      </p>
     </div>
-  </div>
+  </footer>
 
-  <!-- ── Share modal ───────────────────────────────────────────────────── -->
-  <div class="modal-overlay" id="modal-share" style="display:none" role="dialog" aria-modal="true">
-    <div class="modal-box modal-sm">
-      <button class="modal-close" id="modal-share-close" aria-label="Close">✕</button>
-      <h2>Share this report</h2>
-      <p class="modal-desc">Anyone with this link can view the report for 90 days.</p>
-      <div class="share-row">
-        <input type="text" id="share-url-input" class="share-url-input" readonly placeholder="Generating link…" />
-        <button class="btn-primary" id="btn-copy-link">Copy</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Watchlist modal ────────────────────────────────────────────── -->
-  <div class="modal-overlay" id="modal-watchlist" style="display:none" role="dialog" aria-modal="true">
-    <div class="modal-box">
-      <button class="modal-close" id="modal-watchlist-close" aria-label="Close">✕</button>
-      <h2>Watchlist</h2>
-      <p class="modal-desc">Watched properties are automatically re-analysed every 24 hours.</p>
-      <div id="watchlist-items" class="watchlist-items"></div>
-    </div>
-  </div>
-
-  <!-- ── Compare modal ────────────────────────────────────────────── -->
-  <div class="modal-overlay modal-wide" id="modal-compare" style="display:none" role="dialog" aria-modal="true">
-    <div class="modal-box modal-compare-box">
-      <button class="modal-close" id="modal-compare-close" aria-label="Close">✕</button>
-      <h2>Compare Properties</h2>
-      <p class="modal-desc">Run two full 7-agent analyses in parallel. Get a head-to-head verdict: which should you buy?</p>
-
-      <div class="compare-inputs" id="compare-inputs">
-        <div class="compare-input-group">
-          <label class="compare-label">Property A</label>
-          <input type="text" id="compare-addr-a" class="search-input" placeholder="e.g. 363 Van Brunt St, Brooklyn, NY" maxlength="300" />
-        </div>
-        <div class="compare-vs">vs</div>
-        <div class="compare-input-group">
-          <label class="compare-label">Property B</label>
-          <input type="text" id="compare-addr-b" class="search-input" placeholder="e.g. 2121 Airline Dr, Houston, TX" maxlength="300" />
-        </div>
-        <button class="btn-primary btn-compare-run" id="btn-compare-run">Run Comparison →</button>
-      </div>
-
-      <div class="compare-loading" id="compare-loading" style="display:none">
-        <div class="compare-loading-inner">
-          <div class="compare-spinner"></div>
-          <p>Running 7-agent pipeline on both properties in parallel…<br><span class="compare-loading-sub">This takes 30-60 seconds. Grab a coffee.</span></p>
-        </div>
-      </div>
-
-      <div class="compare-results" id="compare-results" style="display:none">
-        <!-- Recommendation banner -->
-        <div class="compare-verdict" id="compare-verdict"></div>
-
-        <!-- Side-by-side reports -->
-        <div class="compare-side-by-side" id="compare-side-by-side">
-          <div class="compare-col" id="compare-col-a"></div>
-          <div class="compare-col" id="compare-col-b"></div>
-        </div>
-
-        <button class="btn-ghost btn-compare-reset" id="btn-compare-reset">← Compare different properties</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Toast notifications ────────────────────────────────────────── -->
-  <div id="toast-container" class="toast-container" aria-live="polite"></div>
-
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script src="app.js"></script>
+  <script src="landing.js"></script>
 </body>
 </html>

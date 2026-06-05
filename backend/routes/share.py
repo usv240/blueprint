@@ -46,7 +46,7 @@ async def create_share_link(address_hash: str):
     }
     await elastic.index_document(IDX_SHARED, share_id, shared_doc)
 
-    share_url = f"{settings.APP_URL}/share/{share_id}"
+    share_url = f"{settings.APP_URL}/app.html?share={share_id}"
     logger.info("[Share] Created share link %s for %s", share_id, address_hash)
     return {
         "share_id":   share_id,

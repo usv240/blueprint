@@ -847,6 +847,32 @@ _PERMIT_CONFIGS: dict[str, dict] = {
     },
 }
 
+# ── Permit-coverage classification ──────────────────────────────────────────
+# A city is "verified" when its dataset URL carries a real Socrata 4×4 resource id
+# (e.g. 3syk-w9eu).  Configs whose URL still uses a generic slug (…/resource/permits.json)
+# are wired to the city's open-data portal but not yet schema-mapped; they fall back
+# gracefully (no permit rows → climate/EPA/OSM still run).  This keeps the public
+# coverage count honest instead of over-claiming every entry as a live feed.
+import re as _re
+
+_SOCRATA_ID_RE = _re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}$")
+
+
+def _socrata_resource_id(url: str) -> str:
+    try:
+        return url.split("/resource/")[1].rsplit(".json", 1)[0]
+    except (IndexError, AttributeError):
+        return ""
+
+
+for _cfg in _PERMIT_CONFIGS.values():
+    _cfg["verified"] = bool(_SOCRATA_ID_RE.match(_socrata_resource_id(_cfg.get("url", ""))))
+
+# NYC has its own dedicated fetcher with real dataset ids → always verified.
+VERIFIED_PERMIT_CITIES = 1 + sum(1 for c in _PERMIT_CONFIGS.values() if c["verified"])
+TOTAL_PERMIT_CITIES    = 1 + len(_PERMIT_CONFIGS)
+
+
 # ── FEMA + USGS ───────────────────────────────────────────────────────────────
 _FEMA_NFHL_URL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query"
 _USGS_EQ_URL   = "https://earthquake.usgs.gov/fdsnws/event/1/query"
@@ -1047,21 +1073,43 @@ async def fetch_permit_records(geo: dict) -> list[dict]:
 async def _nyc_permits(geo: dict) -> list[dict]:
     """Query NYC DOB Permit Issuance dataset."""
     house = geo.get("house_number", "")
-    road = geo.get("road", "").upper()
+    road = geo.get("road", "")
     events = []
     if not house or not road:
         return events
+    # Normalise: strip common suffixes (Street→ST, Avenue→AVE etc.) and uppercase
+    _SUFFIX_MAP = {
+        " STREET": " ST", " AVENUE": " AVE", " BOULEVARD": " BLVD",
+        " PLACE": " PL", " COURT": " CT", " DRIVE": " DR",
+        " ROAD": " RD", " LANE": " LN", " TERRACE": " TER",
+    }
+    road_norm = road.upper()
+    for long, short in _SUFFIX_MAP.items():
+        road_norm = road_norm.replace(long, short)
+    road_norm = road_norm.strip()
+    # Use $where with LIKE so partial names (VAN BRUNT vs VAN BRUNT ST) still match
+    where = f"house__='{house}' AND upper(street_name) LIKE '{road_norm}%'"
     try:
         params = {
-            "house__": house,
-            "street_name": road,
+            "$where": where,
             "$limit": 30,
             "$order": "issuance_date DESC",
         }
         async with httpx.AsyncClient(timeout=12, headers=_HEADERS) as client:
             resp = await client.get(_NYC_PERMITS_URL, params=params)
             resp.raise_for_status()
-            for row in resp.json():
+            rows = resp.json()
+            # If LIKE matched nothing, retry with just the house number (broader)
+            if not rows:
+                params2 = {
+                    "$where": f"house__='{house}'",
+                    "$limit": 30,
+                    "$order": "issuance_date DESC",
+                }
+                resp2 = await client.get(_NYC_PERMITS_URL, params=params2)
+                resp2.raise_for_status()
+                rows = resp2.json()
+            for row in rows:
                 issued = (row.get("issuance_date") or row.get("filing_date") or "")[:10]
                 if not issued:
                     continue
@@ -1158,29 +1206,49 @@ async def fetch_climate_risk(geo: dict) -> dict:
 
 
 async def _fema_flood(lat: float, lng: float) -> dict:
-    """Query FEMA NFHL for flood zone at coordinates."""
-    try:
-        params = {
-            "geometry": f"{lng},{lat}",
-            "geometryType": "esriGeometryPoint",
-            "inSR": "4326",
-            "spatialRel": "esriSpatialRelIntersects",
-            "outFields": "FLD_ZONE,SFHA_TF,ZONE_SUBTY",
-            "returnGeometry": "false",
-            "f": "json",
-        }
-        async with httpx.AsyncClient(timeout=10, headers=_HEADERS) as client:
-            resp = await client.get(_FEMA_NFHL_URL, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-            features = data.get("features", [])
-            if features:
-                attrs = features[0].get("attributes", {})
-                zone = attrs.get("FLD_ZONE", "UNKNOWN")
-                sfha = str(attrs.get("SFHA_TF", "F")).upper() == "T"
-                return {"flood_zone": zone, "sfha": sfha, "zone_subtype": attrs.get("ZONE_SUBTY", "")}
-    except Exception as e:
-        logger.warning("[climate/fema] failed: %s", e)
+    """
+    Query FEMA NFHL for flood zone at coordinates.
+
+    Layer 28 = Flood Hazard Zone polygons (primary).
+    Layer 3  = S_FLD_HAZ_AR (alternate polygon layer, same data different path).
+    Falls back to SFHA inference from zone letter if both fail.
+    """
+    # Layers to try in order: 28 is the canonical FHZ layer; 3 is the alternative
+    _NFHL_LAYERS = [
+        "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query",
+        "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/3/query",
+    ]
+    for url in _NFHL_LAYERS:
+        try:
+            params = {
+                "geometry":     f"{lng},{lat}",
+                "geometryType": "esriGeometryPoint",
+                "inSR":         "4326",
+                "spatialRel":   "esriSpatialRelIntersects",
+                "outFields":    "FLD_ZONE,SFHA_TF,ZONE_SUBTY,FLOODWAY",
+                "returnGeometry": "false",
+                "f":            "json",
+            }
+            async with httpx.AsyncClient(timeout=12, headers=_HEADERS) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                features = data.get("features", [])
+                logger.debug("[climate/fema] layer %s → %d feature(s) for (%.4f,%.4f)",
+                             url.split("/")[-2], len(features), lat, lng)
+                if features:
+                    attrs = features[0].get("attributes", {})
+                    zone  = attrs.get("FLD_ZONE", "UNKNOWN")
+                    sfha  = str(attrs.get("SFHA_TF", "F")).upper() == "T"
+                    # If SFHA_TF is missing, infer from zone letter (A*, V* = SFHA)
+                    if not sfha and zone and zone[0].upper() in ("A", "V"):
+                        sfha = True
+                    logger.info("[climate/fema] zone=%s sfha=%s for (%.4f,%.4f)", zone, sfha, lat, lng)
+                    return {"flood_zone": zone, "sfha": sfha,
+                            "zone_subtype": attrs.get("ZONE_SUBTY", "")}
+        except Exception as e:
+            logger.warning("[climate/fema] layer %s failed for (%.4f,%.4f): %s",
+                           url.split("/")[-2], lat, lng, e)
     return {"flood_zone": "UNKNOWN", "sfha": False}
 
 
@@ -1223,7 +1291,12 @@ async def _usgs_earthquakes(lat: float, lng: float) -> dict:
 
 # ── Neighborhood intelligence ─────────────────────────────────────────────────
 
-_EPA_EJSCREEN_URL = "https://ejscreen.epa.gov/mapper/ejscreenRESTbroker.aspx"
+_EPA_EJSCREEN_URL         = "https://ejscreen.epa.gov/mapper/ejscreenRESTbroker2.aspx"
+_EPA_EJSCREEN_URL_LEGACY  = "https://ejscreen.epa.gov/mapper/ejscreenRESTbroker.aspx"
+_EPA_EJSCREEN_ARCGIS_URL  = (
+    "https://services.arcgis.com/cJ9YHowT8TU7DUyn/arcgis/rest/services"
+    "/EJScreen_Version_2_2/FeatureServer/0/query"
+)
 _OSM_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 
@@ -1266,7 +1339,7 @@ async def fetch_neighborhood_data(geo: dict) -> dict:
         "event_type": "neighborhood_env",
         "event_date": today,
         "description": (
-            f"EPA EJSCREEN — PM2.5: {pm25:.1f} µg/m³ · "
+            f"EPA EJSCREEN · PM2.5: {pm25:.1f} µg/m³ · "
             f"Superfund proximity score: {superfund_score:.0f}/100 · "
             f"Traffic proximity score: {traffic_score:.0f}/100"
         ),
@@ -1311,39 +1384,134 @@ async def fetch_neighborhood_data(geo: dict) -> dict:
     }
 
 
+def _parse_ejscreen_indicators(data: dict) -> dict:
+    """
+    Extract EPA EJSCREEN environmental indicators from any known response format.
+
+    EPA has used several response shapes over the years:
+      v1 broker: {"data": {"PM25": …, "PNPL": …}}
+      v1 broker: {"data": [{"PM25": …}]}
+      v2 broker: {"data": {"features": [{"attributes": {"PM25": …}}]}}
+      ArcGIS FS: {"features": [{"attributes": {"PM25": …}}]}
+
+    Also handles 2024+ field-name variants where raw indicators may be named
+    with a leading underscore or capitalised differently.
+    """
+    # Field name candidates for each indicator (priority order)
+    _FIELD_CANDIDATES = {
+        "pm25":                ["PM25",  "pm25",  "P_PM25",  "RAW_E_PM25"],
+        "superfund_proximity": ["PNPL",  "pnpl",  "P_PNPL",  "NPL_CNT"],
+        "traffic_proximity":   ["PTRAF", "ptraf", "P_PTRAF", "TRAFFIC_SCORE"],
+        "ozone":               ["OZONE", "ozone", "P_OZONE"],
+        "hazardous_waste":     ["PTSDF", "ptsdf", "P_PTSDF"],
+        "wastewater":          ["PWDIS", "pwdis", "P_PWDIS"],
+    }
+    _KNOWN_KEYS = {k for lst in _FIELD_CANDIDATES.values() for k in lst}
+
+    def _find_attrs(obj) -> dict:
+        """Recursively locate the first dict that contains a known EPA field."""
+        if isinstance(obj, dict):
+            if any(k in obj for k in _KNOWN_KEYS):
+                return obj
+            if "features" in obj and isinstance(obj["features"], list):
+                for feat in obj["features"]:
+                    found = _find_attrs(feat.get("attributes", {}))
+                    if found:
+                        return found
+            for v in obj.values():
+                found = _find_attrs(v)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for item in obj:
+                found = _find_attrs(item)
+                if found:
+                    return found
+        return {}
+
+    root = data.get("data", data)
+    attrs = _find_attrs(root)
+    if not attrs:
+        return {}
+
+    result = {}
+    for key, candidates in _FIELD_CANDIDATES.items():
+        for cand in candidates:
+            val = _safe_float(attrs.get(cand))
+            if val is not None and val > 0:
+                result[key] = val
+                break
+        else:
+            result[key] = 0.0
+
+    return result
+
+
 async def _epa_ejscreen(lat: float, lng: float) -> dict:
-    """Query EPA EJSCREEN for environmental indicators at coordinates."""
-    try:
-        import json as _json
-        geometry = _json.dumps({"x": lng, "y": lat})
+    """
+    Query EPA EJSCREEN for environmental indicators at coordinates.
+
+    Tries three sources in order, stopping at the first non-zero result:
+      1. ejscreenRESTbroker2.aspx  (current EPA endpoint, 2024+)
+      2. ejscreenRESTbroker.aspx   (legacy broker, kept as fallback)
+      3. ArcGIS FeatureServer      (EJScreen_Version_2_2, most stable long-term)
+    """
+    import json as _json
+
+    async def _try_broker(url: str) -> dict:
         params = {
-            "namestr": "",
-            "geometry": geometry,
-            "distance": "0.5",
-            "unit": "9093",  # miles
+            "namestr":  "",
+            "geometry": _json.dumps({"x": lng, "y": lat}),
+            "distance": "1",
+            "unit":     "9035",   # kilometres
             "areatype": "",
-            "areaid": "",
-            "f": "json",
+            "areaid":   "",
+            "f":        "json",
         }
         async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
-            resp = await client.get(_EPA_EJSCREEN_URL, params=params)
+            resp = await client.get(url, params=params)
             resp.raise_for_status()
-            data = resp.json()
-            # EJSCREEN returns arrays of indicator values
-            indicators = data.get("data", {})
-            if not indicators:
-                return {}
-            # Key indicators: PM25, PNPL (Superfund proximity), PTRAF (traffic)
-            return {
-                "pm25": _safe_float(indicators.get("PM25", 0)) or 0,
-                "superfund_proximity": _safe_float(indicators.get("PNPL", 0)) or 0,
-                "traffic_proximity": _safe_float(indicators.get("PTRAF", 0)) or 0,
-                "ozone": _safe_float(indicators.get("OZONE", 0)) or 0,
-                "hazardous_waste": _safe_float(indicators.get("PTSDF", 0)) or 0,
-                "wastewater": _safe_float(indicators.get("PWDIS", 0)) or 0,
-            }
-    except Exception as e:
-        logger.warning("[epa/ejscreen] failed: %s", e)
+            logger.debug("[epa/ejscreen] broker %s response (%.4f,%.4f): %s",
+                         url.split("/")[-1], lat, lng, resp.text[:300])
+            return resp.json()
+
+    async def _try_arcgis() -> dict:
+        params = {
+            "geometry":     _json.dumps({"x": lng, "y": lat}),
+            "geometryType": "esriGeometryPoint",
+            "inSR":         "4326",
+            "spatialRel":   "esriSpatialRelIntersects",
+            "outFields":    "PM25,PNPL,PTRAF,OZONE,PTSDF,PWDIS,P_PM25,P_PNPL,P_PTRAF",
+            "returnGeometry": "false",
+            "f":            "json",
+        }
+        async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+            resp = await client.get(_EPA_EJSCREEN_ARCGIS_URL, params=params)
+            resp.raise_for_status()
+            logger.debug("[epa/ejscreen] arcgis response (%.4f,%.4f): %s",
+                         lat, lng, resp.text[:300])
+            return resp.json()
+
+    sources = [
+        ("broker_v2",  lambda: _try_broker(_EPA_EJSCREEN_URL)),
+        ("broker_v1",  lambda: _try_broker(_EPA_EJSCREEN_URL_LEGACY)),
+        ("arcgis_fs",  _try_arcgis),
+    ]
+
+    for name, fetch in sources:
+        try:
+            data = await fetch()
+            result = _parse_ejscreen_indicators(data)
+            if result and not all(v == 0 for v in result.values()):
+                logger.info("[epa/ejscreen] got data from %s for (%.4f,%.4f): pm25=%.1f superfund=%.0f",
+                            name, lat, lng, result.get("pm25", 0), result.get("superfund_proximity", 0))
+                return result
+            logger.debug("[epa/ejscreen] %s returned all-zero for (%.4f,%.4f) — trying next source",
+                         name, lat, lng)
+        except Exception as e:
+            logger.warning("[epa/ejscreen] %s failed for (%.4f,%.4f): %s", name, lat, lng, e)
+
+    logger.warning("[epa/ejscreen] all sources failed for (%.4f,%.4f) — returning empty", lat, lng)
     return {}
 
 

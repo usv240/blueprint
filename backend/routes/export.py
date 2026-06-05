@@ -55,6 +55,10 @@ async def _generate_html(report: dict) -> str:
     nbhd      = report.get("neighborhood", {})
 
     colors      = {"LOW": "#22c55e", "MEDIUM": "#eab308", "HIGH": "#f97316", "CRITICAL": "#ef4444"}
+    # Prefer debate-adjusted score/level if available
+    if debate.get("final_score") is not None:
+        score = debate["final_score"]
+        level = report.get("risk_level", level)  # already updated by debate write-back
     score_color = colors.get(level, "#64748b")
 
     debate_verdict  = debate.get("buy_recommendation", "")
@@ -122,7 +126,7 @@ Property Timeline — up to 15 events (JSON array, each has date/event_type/desc
 - Risk score shown as a large number circle with {score_color} ring and "{level}" label
 - Section order: 1) Cover header  2) AI Debate Verdict  3) Executive Summary  4) Risk Flags  5) Escape Plan  6) Neighbourhood Intelligence  7) Due Diligence Questions  8) Property Timeline  9) Positive Signals
 - AI Debate: two side-by-side cards — green "Optimist" with its argument and score, red "Pessimist" with its argument and score. Below them a verdict block with {debate_verdict} badge.
-- Risk Flags: red/orange warning cards with ⚠ icon, each flag as a card
+- Risk Flags: red/orange warning cards with a bold "!" indicator, each flag as a card
 - Escape Plan: numbered ordered list with blue accent, each step prominent
 - Neighbourhood: 2-column grid of metric cards, green if ok=true, red/amber if ok=false
 - Timeline: clean table with columns Date | Type | Description | Amount | Source; alternate row shading
@@ -158,7 +162,7 @@ Property Timeline — up to 15 events (JSON array, each has date/event_type/desc
 def _minimal_fallback(address: str, score, level: str, summary: str, color: str, created: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"/>
-<title>BLUEPRINT — {address}</title>
+<title>BLUEPRINT · {address}</title>
 <style>
 body{{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:2rem;color:#1e293b;}}
 .header{{background:#0f172a;color:white;padding:2rem;border-radius:8px;margin-bottom:2rem;}}

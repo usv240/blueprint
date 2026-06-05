@@ -126,7 +126,7 @@ Respond with ONLY valid JSON — no markdown, no prose outside the JSON:
             "recommended": rec,
             "confidence": "LOW",
             "headline": f"Property {rec} has the lower risk score ({min(score_a, score_b)}/100).",
-            "rationale": "Recommendation derived from risk scores only — Gemini comparison unavailable.",
+            "rationale": "Recommendation derived from risk scores only. Gemini comparison unavailable.",
             "a_pros": [], "a_cons": [],
             "b_pros": [], "b_cons": [],
             "deal_breaker": "",
