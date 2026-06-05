@@ -84,14 +84,32 @@ async def generate(prompt: str, temperature: float = 0.3) -> str:
 
 
 async def generate_json(prompt: str, temperature: float = 0.1) -> dict | list:
-    """Generate structured JSON output. Returns {} on failure."""
-    full_prompt = prompt + "\n\nRespond with ONLY valid JSON, no markdown fences."
+    """Generate structured JSON output. Returns {} on failure.
+
+    Robust extraction: strips markdown fences, then finds the outermost
+    JSON object/array even when Gemini prepends reasoning text.
+    """
+    full_prompt = prompt + "\n\nRespond with ONLY valid JSON, no markdown fences, no explanatory text before or after."
     text = await generate(full_prompt, temperature=temperature)
     text = text.strip()
+
+    # Strip markdown fences
     text = re.sub(r"^```[a-z]*\n?", "", text)
     text = re.sub(r"\n?```$", "", text)
+    text = text.strip()
+
+    # If Gemini prefixed reasoning text, find the first { or [
+    if text and text[0] not in ('{', '['):
+        for bracket, close in [('{', '}'), ('[', ']')]:
+            idx = text.find(bracket)
+            if idx != -1:
+                end = text.rfind(close)
+                if end > idx:
+                    text = text[idx:end + 1]
+                    break
+
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
-        logger.warning("[Gemini] JSON parse failed: %s | raw: %.200s", e, text)
+        logger.warning("[Gemini] JSON parse failed: %s | raw: %.300s", e, text)
         return {}

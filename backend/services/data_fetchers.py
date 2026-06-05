@@ -1218,11 +1218,24 @@ async def _fema_flood(lat: float, lng: float) -> dict:
         "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query",
         "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/3/query",
     ]
-    for url in _NFHL_LAYERS:
+    # Try point query on both layers, then widen to a small bounding box if still nothing
+    _DELTA = 0.002  # ~200m bounding box fallback
+    query_variants = [
+        # (url, geometry_str, geometry_type) — point first, envelope fallback
+        (url, f"{lng},{lat}", "esriGeometryPoint")
+        for url in _NFHL_LAYERS
+    ] + [
+        # bounding-box fallback: catches coordinates that fall on polygon boundaries/gaps
+        (_NFHL_LAYERS[0],
+         f"{lng-_DELTA},{lat-_DELTA},{lng+_DELTA},{lat+_DELTA}",
+         "esriGeometryEnvelope"),
+    ]
+
+    for url, geometry, geom_type in query_variants:
         try:
             params = {
-                "geometry":     f"{lng},{lat}",
-                "geometryType": "esriGeometryPoint",
+                "geometry":     geometry,
+                "geometryType": geom_type,
                 "inSR":         "4326",
                 "spatialRel":   "esriSpatialRelIntersects",
                 "outFields":    "FLD_ZONE,SFHA_TF,ZONE_SUBTY,FLOODWAY",
@@ -1234,20 +1247,19 @@ async def _fema_flood(lat: float, lng: float) -> dict:
                 resp.raise_for_status()
                 data = resp.json()
                 features = data.get("features", [])
-                logger.debug("[climate/fema] layer %s → %d feature(s) for (%.4f,%.4f)",
-                             url.split("/")[-2], len(features), lat, lng)
+                logger.debug("[climate/fema] %s/%s → %d feature(s) for (%.4f,%.4f)",
+                             url.split("/")[-2], geom_type[:5], len(features), lat, lng)
                 if features:
                     attrs = features[0].get("attributes", {})
                     zone  = attrs.get("FLD_ZONE", "UNKNOWN")
                     sfha  = str(attrs.get("SFHA_TF", "F")).upper() == "T"
-                    # If SFHA_TF is missing, infer from zone letter (A*, V* = SFHA)
                     if not sfha and zone and zone[0].upper() in ("A", "V"):
                         sfha = True
                     logger.info("[climate/fema] zone=%s sfha=%s for (%.4f,%.4f)", zone, sfha, lat, lng)
                     return {"flood_zone": zone, "sfha": sfha,
                             "zone_subtype": attrs.get("ZONE_SUBTY", "")}
         except Exception as e:
-            logger.warning("[climate/fema] layer %s failed for (%.4f,%.4f): %s",
+            logger.warning("[climate/fema] %s failed for (%.4f,%.4f): %s",
                            url.split("/")[-2], lat, lng, e)
     return {"flood_zone": "UNKNOWN", "sfha": False}
 
