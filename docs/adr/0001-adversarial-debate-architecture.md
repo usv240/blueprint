@@ -1,48 +1,25 @@
-# ADR-0001: Adversarial Debate Before Every Verdict
+# ADR-0001: Adversarial debate before every verdict
 
 **Status:** Accepted  
 **Date:** 2026-05-10
 
 ---
 
-## Context
+The first version of BLUEPRINT had SynthesisAgent produce a score and that was the answer. It worked, but something felt off. Run the same address twice and you'd get different scores. More importantly, there was no way to tell whether a score of 42 was a confident 42 or a Gemini guess dressed up as a number.
 
-Every AI-generated risk score is a single point estimate from a model that has already committed to a narrative. Anchoring bias — the tendency to weight early evidence too heavily — is a known failure mode in LLM reasoning chains. A single Gemini call producing "Risk score: 42, NEGOTIATE" gives the buyer no way to understand how confident that number is, or what the strongest counter-arguments are.
+The problem is anchoring. Once a language model commits to a framing early in a reasoning chain, it tends to stick with it even when later evidence contradicts it. A permit backlog found in step 3 will colour how the model interprets the flood zone data in step 4. There's no neutral observer.
 
-Property purchase decisions involve hundreds of thousands of dollars. A false negative (underestimating risk) or false positive (overestimating risk) both cause real harm.
+Three other approaches were considered. Averaging three independent synthesis calls reduces variance but all calls see the same data in the same order: you are averaging over noise, not over genuine disagreement. Adding a fact-checker pass is just another LLM pass with the same anchoring problem. Neither gives the buyer any signal about *how confident* the system is.
 
-Options considered:
+The adversarial debate does something different. After SynthesisAgent produces an initial score, DebateAgent runs two sub-agents in sequence with opposing mandates:
 
-| Approach | Problem |
-|---|---|
-| Single synthesis call | Anchors on early data; no confidence signal; opaque to buyer |
-| Ensemble average (3 calls, average scores) | Reduces variance but all calls share same framing; no adversarial signal |
-| External fact-checker pass | Adds latency; still same model, same anchoring |
-| **Adversarial debate (chosen)** | Forces both sides to be argued; produces confidence interval; score movement is explainable |
+- **OptimistAgent** must argue the score is too high and cite specific reasons why
+- **PessimistAgent** must argue the score is too low and cite specific reasons why
 
----
+A VerdictAgent reads both arguments and produces the final confidence-adjusted score. The buyer sees all three positions: not just the number at the end.
 
-## Decision
+The practical result: when OptimistAgent says 28 and PessimistAgent says 72, the system reports MEDIUM confidence and the buyer knows to dig deeper. When they both land near 40, that's a high-confidence score. The debate transcript also catches hallucinations: if Optimist is citing "zero environmental risk" but the PessimistAgent correctly notes the EPA data returned zeros (a known data gap), that tension surfaces before the buyer acts on it.
 
-After SynthesisAgent produces an initial score, DebateAgent runs two opposing Gemini sub-agents in sequence:
+Two downsides worth being honest about. This adds roughly 10–15 seconds of latency per analysis: two extra Gemini calls. And scores are non-deterministic: the same address on two separate runs can score a few points differently. Neither is a dealbreaker. The latency is acceptable given the decision being made. The non-determinism is mitigated by surfacing the debate range rather than presenting a bare number as ground truth.
 
-- **OptimistAgent** — instructed to argue the score is too *high*; must cite specific positive signals
-- **PessimistAgent** — instructed to argue the score is too *low*; must cite specific risk factors
-
-A VerdictAgent adjudicates and outputs a confidence-adjusted final score. The buyer sees all three positions — not just the verdict.
-
----
-
-## Consequences
-
-**Positive:**
-- The score is explainable: "Synthesis said 50. Optimist argued 28. Pessimist argued 72. Final verdict 45 at MEDIUM confidence."
-- Catches hallucinations: if Optimist and Pessimist both converge close together, confidence is HIGH; wide divergence → MEDIUM/LOW
-- Unique product differentiator — no comparable property tool exposes its reasoning this way
-- Buyers make better decisions with the debate transcript than with a bare number
-
-**Negative:**
-- Two extra Gemini calls per analysis (~10–15s additional latency)
-- Scores are non-deterministic across runs — the same property can score slightly differently
-
-**Accepted trade-off:** The latency is acceptable given the stakes of the decision. Non-determinism is mitigated by showing the debate range, not just the point estimate.
+No comparable property intelligence tool shows the reasoning that produced the score. That's the differentiator.

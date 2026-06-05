@@ -1,53 +1,24 @@
-# ADR-0002: Elastic as the Intelligence Layer, Not Just Storage
+# ADR-0002: Elastic as the intelligence layer, not just storage
 
 **Status:** Accepted  
 **Date:** 2026-05-12
 
 ---
 
-## Context
+BLUEPRINT needs somewhere to store property events, cross-reference them across analyses, and find patterns that no single-property analysis can see. The obvious candidates were PostgreSQL, a dedicated vector DB like Pinecone, or MongoDB Atlas.
 
-The pipeline needs a place to store property events, cross-reference them across analyses, and surface patterns that a single-property analysis cannot see. The obvious choices were:
+Postgres handles the storage and SQL part fine, but semantic search over heterogeneous property records requires something else. Pinecone gives you dense vector similarity, but nothing else: no BM25 hybrid, no aggregations, no reverse-search, no geo queries. MongoDB added vector search relatively recently and it works, but significant_terms, percolator, and ES|QL are not in its vocabulary.
 
-| Option | What it provides | What it lacks |
-|---|---|---|
-| PostgreSQL / SQLite | Reliable storage, SQL queries | No semantic search; no vector embeddings; no percolator |
-| Pinecone / Weaviate (pure vector DB) | Dense vector similarity | No BM25 hybrid; no ES\|QL aggregations; no reverse-search; no geo |
-| MongoDB Atlas | Document storage + vector search | No ELSER; no significant_terms; no percolator |
-| **Elastic Cloud Serverless (chosen)** | Full AI stack: ELSER + BM25 + reranker + ES\|QL + percolator + geo + aggregations | More operational surface area |
+Elastic has all of it. More importantly, each capability maps to something the product actually needs:
 
-The hackathon is specifically the **Elastic track**, requiring meaningful MCP integration. But beyond compliance, Elastic uniquely offers capabilities that directly match BLUEPRINT's needs.
+ELSER over the events index means SynthesisAgent can find semantically relevant events even when the exact keywords don't match. A permit description that says "structural modification" and a deed note that says "major renovation" should surface together. BM25 alone misses that.
 
----
+RRF hybrid retrieval blends the lexical and semantic rankings instead of picking one. In practice this works better than either alone for property records, which mix structured data (dates, addresses, permit types) with unstructured descriptions.
 
-## Decision
+ES|QL makes flip-fraud detection possible. The query that detects a permit opened in the 90 days before or after a sale is a straightforward STATS query over two event types. Doing the same in application code after fetching all events is possible but fragile.
 
-Use Elastic as the **intelligence layer**, not just a data store. Every Elastic capability maps to a concrete product feature:
+The percolator inverts the usual search direction. Instead of querying Elastic for matches to a new document, it matches saved risk-profile queries against every new property as it completes analysis. That is how "2 saved risk profiles matched" shows up in the report without polling.
 
-| Elastic capability | BLUEPRINT feature |
-|---|---|
-| ELSER sparse-vector semantic search | Retrieves semantically relevant events even when keywords don't match |
-| RRF hybrid retriever (BM25 + ELSER) | Best-of-both: exact permit/address matches + semantic context |
-| `text_similarity_reranker` | Reorders retrieved events by actual risk relevance before synthesis |
-| ES\|QL cross-reference | Flip-fraud detection: correlates permit filing dates vs deed transfer dates |
-| Percolator (reverse search) | Proactive: every new property is matched against saved risk profiles |
-| `geo_distance` query | Cross-property intelligence: surfaces similar-risk properties within 50km |
-| `significant_terms` aggregation | Identifies which risk flags are statistically over-represented in each risk band |
-| Memory write-back (6 indices) | Each analysis compounds: the system gets smarter with every property analysed |
-| Agent Builder MCP | Gemini agents call Elastic tools natively over Streamable HTTP |
+geo_distance and significant_terms are the memory layer features. As BLUEPRINT analyses more properties, geo_distance surfaces genuinely nearby comparable properties rather than falling back to same-state heuristics. significant_terms identifies which risk flags are statistically over-represented in each risk band across the entire corpus, which is something that emerges only after enough data accumulates.
 
----
-
-## Consequences
-
-**Positive:**
-- The system has genuine cross-property intelligence — not just isolated analyses
-- Percolator enables proactive alerting without polling
-- Significant terms gives corpus-level insight no single-property analysis can produce
-- The Elastic integration is deep enough to be the architectural centrepiece, not a checkbox
-
-**Negative:**
-- Requires an Elastic Cloud Serverless project (free trial available)
-- All Elastic calls are wrapped in try/except so the pipeline degrades gracefully if unavailable
-
-**Accepted trade-off:** The operational dependency on Elastic is justified by the unique capabilities it unlocks. Every feature degrades gracefully to a no-Elastic fallback.
+The operational trade-off is a real dependency on an Elastic Cloud Serverless project. Every Elastic call is wrapped in a try/except so the pipeline degrades gracefully when it is unavailable, but the cross-property intelligence features do not work without it.
